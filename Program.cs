@@ -9,9 +9,22 @@ await Parser.Default.ParseArguments<Options>(args).WithParsedAsync(ProcessDocume
 
 async Task ProcessDocument(Options options)
 {
-    var pidFilePath = await GetPagePids(options);
-    var jpgDirectory = await GetAndConvertImageDatastreams(options, pidFilePath);
-    // TODO: upload to transkribus, save the process ids in a database
+    string pidFilePath = null;
+    DirectoryInfo jpgDirectory = null;
+    try
+    {
+        pidFilePath = await GetPagePids(options);
+        jpgDirectory = await GetAndConvertImageDatastreams(options, pidFilePath);
+        await SendImagesToTranskribus(options, jpgDirectory);
+    }
+    finally
+    {        
+        if (pidFilePath is not null)
+        {
+            File.Delete(pidFilePath);
+        }
+        jpgDirectory?.Delete(recursive: true);
+    }
 }
 
 async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
@@ -20,9 +33,8 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     startInfo.RedirectStandardError = true;
     var process = new Process {StartInfo = startInfo};
     var errorOutput = string.Empty;
-    process.ErrorDataReceived += (_, args) => { errorOutput += args.Data; };
-    var started = process.Start();
-    if (!started)
+    process.ErrorDataReceived += (_, args) => { errorOutput += Environment.NewLine + args.Data; };
+    if (!process.Start())
     {
         throw new Exception($"Failed to start {startInfo.FileName} process.");
     }
@@ -30,7 +42,7 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     await process.WaitForExitAsync();
     if (!string.IsNullOrWhiteSpace(errorOutput))
     {
-        throw new Exception($"{startInfo.FileName} process errored: " + errorOutput);
+        throw new Exception($"{startInfo.FileName} process errored:" + errorOutput);
     }
 }
 
@@ -75,4 +87,25 @@ async Task<DirectoryInfo> GetAndConvertImageDatastreams(Options options, string 
         jp2Directory.Delete(recursive: true);
     }
     return jpgDirectory;
+}
+
+async Task SendImagesToTranskribus(Options options, DirectoryInfo jpgDirectory)
+{
+    // TODO: read database path and transkribus credentials from options/env
+    var database = new Database("transkribus_process.db");
+    var transkribusClient = new TranskribusClient();
+    await transkribusClient.Authorize("", "");
+    foreach (var file in jpgDirectory.EnumerateFiles())
+    {
+        var filename = Path.GetFileNameWithoutExtension(file.Name);
+        var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file.FullName));
+        var processId = await transkribusClient.Process(options.HtrId, imageBase64);
+        database.Pages.Add(new Page
+        {
+            ProcessId = processId,
+            FileName = filename,
+            InProgress = true
+        });
+        await database.SaveChangesAsync();
+    }
 }

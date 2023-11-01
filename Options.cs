@@ -12,8 +12,5 @@ class Options
     public string Pid { get; set; }
 
     [Option]
-    public bool SinglePage { get; set; }
-
-    [Option]
     public int HtrId { get; set; }
 }

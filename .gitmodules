@@ -1,0 +1,3 @@
+[submodule "hOCR-to-ALTO"]
+	path = hOCR-to-ALTO
+	url = git@github.com:filak/hOCR-to-ALTO.git

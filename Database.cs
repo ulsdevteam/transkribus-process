@@ -18,7 +18,7 @@ class Database : DbContext
 
 class Page
 {
-    public string FileName { get; set; }
+    public string Pid { get; set; }
     public int ProcessId { get; set;}
     public bool InProgress { get; set; }
 }

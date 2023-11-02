@@ -1,5 +1,6 @@
+using System.Xml.Linq;
 using Flurl.Http;
-using Newtonsoft.Json.Linq;
+using Flurl.Http.Xml;
 
 class TranskribusClient
 {
@@ -40,5 +41,16 @@ class TranskribusClient
             }
         }).ReceiveJson();
         return response.processId;
+    }
+
+    public async Task<string> GetProcessStatus(int processId)
+    {
+        var response = await Client.Request(processId).GetJsonAsync();
+        return response.status;
+    }
+
+    public async Task<XDocument> GetAltoXml(int processId)
+    {
+        return await Client.Request(processId, "alto").GetXDocumentAsync();
     }
 }

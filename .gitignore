@@ -2,3 +2,7 @@
 /bin
 /obj
 .env
+*.db*
+*.jpg
+*.xml
+*.shtml

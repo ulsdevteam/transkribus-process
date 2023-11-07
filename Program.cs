@@ -5,6 +5,7 @@ using System.Xml;
 using System.Xml.Xsl;
 using CommandLine;
 using dotenv.net;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
 DotEnv.Load();
@@ -15,10 +16,12 @@ var database = new Database(config["DATABASE_PATH"]);
 await database.Database.EnsureCreatedAsync();
 var transkribusClient = new TranskribusClient();
 await transkribusClient.Authorize(config["TRANSKRIBUS_USERNAME"], config["TRANSKRIBUS_PASSWORD"]);
-await Parser.Default.ParseArguments<ProcessOptions, CheckOptions, TestJpgsOptions>(args).MapResult(
+await Parser.Default.ParseArguments<ProcessOptions, CheckOptions, TestUploadOptions, TestDownloadOptions, TestXsltOptions>(args).MapResult(
     (ProcessOptions options) => ProcessDocument(options),
     (CheckOptions options) => CheckProgress(options),
-    (TestJpgsOptions options) => TestWithJpgs(options),
+    (TestUploadOptions options) => TestWithJpgs(options),
+    (TestDownloadOptions options) => TestDownload(options),
+    (TestXsltOptions options) => TestXslt(options),
     (errors) => Task.CompletedTask
 );
 
@@ -30,7 +33,7 @@ async Task ProcessDocument(ProcessOptions options)
     {
         pidFilePath = await GetPagePids(options);
         jpgDirectory = await GetAndConvertImageDatastreams(options, pidFilePath);
-        await SendImagesToTranskribus(options.HtrId, jpgDirectory);
+        await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
     }
     finally
     {        
@@ -104,11 +107,17 @@ async Task<DirectoryInfo> GetAndConvertImageDatastreams(IdCrudOptions options, s
     return jpgDirectory;
 }
 
-async Task SendImagesToTranskribus(int htrId, DirectoryInfo jpgDirectory)
+async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool overwrite = false)
 {
     foreach (var file in jpgDirectory.EnumerateFiles())
     {
         var pid = Regex.Replace(file.Name, "_JP2.jpg$", "");
+        if (!overwrite && database.Pages.FirstOrDefault(p => p.Pid == pid) is Page existingPage)
+        {
+            Console.Error.WriteLine($"Page {pid} has already been uploaded to Transkribus {(existingPage.InProgress ? "and is currently processing" : "and HOCR datastreams have already been pushed")}.");
+            Console.Error.WriteLine("Run again with the --overwrite flag to disregard this and re-upload them.");
+            continue;
+        }
         var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file.FullName));
         var processId = await transkribusClient.Process(htrId, imageBase64);
         database.Pages.Add(new Page
@@ -126,19 +135,7 @@ async Task CheckProgress(CheckOptions options)
     var hocrDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_hocrs"));
     try
     {
-        var xslt = LoadXslt();
-        foreach (var page in database.Pages.Where(p => p.InProgress))
-        {
-            var status = await transkribusClient.GetProcessStatus(page.ProcessId);
-            if (status != "FINISHED")
-            {
-                continue;
-            }
-            var altoXml = await transkribusClient.GetAltoXml(page.ProcessId);
-            var hocrFileName = Path.Join(hocrDirectory.FullName, page.Pid + "_HOCR.shtml");
-            xslt.Transform(altoXml.CreateReader(), XmlWriter.Create(hocrFileName));
-            page.InProgress = false;
-        }
+        await GetAndConvertTranskribusHocr(hocrDirectory);
         await PushHocrDatastreams(options, hocrDirectory);
         await database.SaveChangesAsync();
     }
@@ -148,12 +145,34 @@ async Task CheckProgress(CheckOptions options)
     }
 }
 
+async Task GetAndConvertTranskribusHocr(DirectoryInfo hocrDirectory, DirectoryInfo altoDirectory = null)
+{
+    var xslt = LoadXslt();
+    foreach (var page in database.Pages.Where(p => p.InProgress))
+    {
+        var status = await transkribusClient.GetProcessStatus(page.ProcessId);
+        if (status != "FINISHED")
+        {
+            continue;
+        }
+        var altoXml = await transkribusClient.GetAltoXml(page.ProcessId);
+        if (altoDirectory is not null)
+        {
+            var altoFileName = Path.Join(altoDirectory.FullName, page.Pid + "_ALTO.xml");
+            altoXml.Save(File.OpenWrite(altoFileName));            
+        }
+        var hocrFileName = Path.Join(hocrDirectory.FullName, page.Pid + "_HOCR.shtml");
+        xslt.Transform(altoXml.CreateReader(), XmlWriter.Create(hocrFileName));
+        page.InProgress = false;
+    }
+}
+
 XslCompiledTransform LoadXslt()
 {
     var stream = Assembly.GetExecutingAssembly()
         .GetManifestResourceStream("transkribus_process.hOCR_to_ALTO.alto__hocr.xsl");
     var reader = XmlReader.Create(stream);
-    var transformer = new XslCompiledTransform();
+    var transformer = new XslCompiledTransform(enableDebug: true);
     transformer.Load(reader);
     return transformer; 
 }
@@ -167,8 +186,28 @@ async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirector
     });
 }
 
-async Task TestWithJpgs(TestJpgsOptions options)
+async Task TestWithJpgs(TestUploadOptions options)
 {
     var jpgDirectory = new DirectoryInfo(options.JpgDirectory);
-    await SendImagesToTranskribus(options.HtrId, jpgDirectory);
+    await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
+}
+
+async Task TestDownload(TestDownloadOptions options)
+{
+    var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
+    var altoDirectory = options.AltoDirectory is not null ? new DirectoryInfo(options.AltoDirectory) : null;
+    await GetAndConvertTranskribusHocr(hocrDirectory, altoDirectory);
+    await database.SaveChangesAsync();
+}
+
+async Task TestXslt(TestXsltOptions options)
+{
+    var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
+    var altoDirectory = new DirectoryInfo(options.AltoDirectory);
+    var xslt = LoadXslt();
+    foreach (var altoXml in altoDirectory.EnumerateFiles())
+    {
+        var hocrFileName = Path.Join(hocrDirectory.FullName, altoXml.Name.Replace("_ALTO.xml", "_HOCR.shtml"));
+        xslt.Transform(XmlReader.Create(altoXml.OpenText()), XmlWriter.Create(hocrFileName));
+    }
 }

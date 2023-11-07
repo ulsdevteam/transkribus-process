@@ -40,7 +40,7 @@ class TranskribusClient
                 base64 = imageBase64
             }
         }).ReceiveJson();
-        return response.processId;
+        return (int) response.processId;
     }
 
     public async Task<string> GetProcessStatus(int processId)

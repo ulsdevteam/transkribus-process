@@ -14,6 +14,11 @@ class Database : DbContext
     {
         options.UseSqlite($"Data Source={DbPath}");
     }
+
+    protected override void OnModelCreating(ModelBuilder model)
+    {
+        model.Entity<Page>().HasKey(p => p.Pid);
+    }
 }
 
 class Page

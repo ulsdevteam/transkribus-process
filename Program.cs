@@ -14,8 +14,7 @@ var config = new ConfigurationBuilder()
     .Build();
 var database = new Database(config["DATABASE_PATH"]);
 await database.Database.EnsureCreatedAsync();
-var transkribusClient = new TranskribusClient();
-await transkribusClient.Authorize(config["TRANSKRIBUS_USERNAME"], config["TRANSKRIBUS_PASSWORD"]);
+var transkribusClient = new TranskribusClient(config["TRANSKRIBUS_USERNAME"], config["TRANSKRIBUS_PASSWORD"]);
 await Parser.Default.ParseArguments<ProcessOptions, CheckOptions, TestUploadOptions, TestDownloadOptions, TestXsltOptions>(args).MapResult(
     (ProcessOptions options) => ProcessDocument(options),
     (CheckOptions options) => CheckProgress(options),

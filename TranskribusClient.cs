@@ -1,28 +1,51 @@
+using System.Security;
 using System.Xml.Linq;
 using Flurl.Http;
 using Flurl.Http.Xml;
+using Newtonsoft.Json;
 
 class TranskribusClient
 {
     private FlurlClient Client { get; set; }
-    private string AccessToken { get; set; }
+    private string Username { get; set; }
+    private string Password { get; set; }
+    private AuthResponse AuthResponse { get; set; }
+    private DateTimeOffset AuthResponseRetrieved { get; set; }
 
-    public TranskribusClient()
+    private const string ApiUri = "https://transkribus.eu/processing/v1/processes";
+    private const string AuthUri = "https://account.readcoop.eu/auth/realms/readcoop/protocol/openid-connect/token";
+
+    public TranskribusClient(string username, string password)
     {
-        Client = new FlurlClient("https://transkribus.eu/processing/v1/processes");
+        Username = username;
+        Password = password;
+        Client = new FlurlClient(ApiUri).BeforeCall(call => Authorize(call.Request));
     }
 
-    public async Task Authorize(string username, string password)
+    private async Task Authorize(IFlurlRequest request)
     {
-        var response = await "https://account.readcoop.eu/auth/realms/readcoop/protocol/openid-connect/token".PostUrlEncodedAsync(new 
+        if (AuthResponse is null || AuthResponseRetrieved.AddSeconds(AuthResponse.RefreshExpiresIn) < DateTimeOffset.Now.AddMinutes(-5))
         {
-            username,
-            password,
-            grant_type = "password",
-            client_id = "processing-api-client"
-        }).ReceiveJson();
-        AccessToken = response.access_token;
-        Client.BeforeCall(call => call.Request.WithHeader("Authorization", "Bearer " + AccessToken));
+            AuthResponse = await AuthUri.PostUrlEncodedAsync(new 
+            {
+                username = Username,
+                password = Password,
+                grant_type = "password",
+                client_id = "processing-api-client"
+            }).ReceiveJson<AuthResponse>();
+            AuthResponseRetrieved = DateTimeOffset.Now;
+        }
+        else if (AuthResponseRetrieved.AddSeconds(AuthResponse.ExpiresIn - 30) < DateTimeOffset.Now)
+        {
+            AuthResponse = await AuthUri.PostUrlEncodedAsync(new
+            {
+                refresh_token = AuthResponse.RefreshToken,
+                grant_type = "refresh_token",
+                client_id = "processing-api-client"
+            }).ReceiveJson<AuthResponse>();
+            AuthResponseRetrieved = DateTimeOffset.Now;
+        }
+        request.WithHeader("Authorization", "Bearer " + AuthResponse.AccessToken);
     }
 
     public async Task<int> Process(int htrId, string imageBase64)
@@ -53,4 +76,31 @@ class TranskribusClient
     {
         return await Client.Request(processId, "alto").GetXDocumentAsync();
     }
+}
+
+class AuthResponse
+{
+    [JsonProperty("access_token")]
+    public string AccessToken { get; set; }
+
+    [JsonProperty("expires_in")]
+    public long ExpiresIn { get; set; }
+
+    [JsonProperty("refresh_expires_in")]
+    public long RefreshExpiresIn { get; set; }
+
+    [JsonProperty("refresh_token")]
+    public string RefreshToken { get; set; }
+
+    [JsonProperty("token_type")]
+    public string TokenType { get; set; }
+
+    [JsonProperty("not-before-policy")]
+    public long NotBeforePolicy { get; set; }
+
+    [JsonProperty("session_state")]
+    public Guid SessionState { get; set; }
+
+    [JsonProperty("scope")]
+    public string Scope { get; set; }
 }

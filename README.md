@@ -4,4 +4,8 @@ Pulls images from Islandora, uploads them to Transkribus for processing, gets th
 
 ## Prerequisites
 
-Expects drush (with islandora_datastreams_crud) and convert (provided by imagemagick) to be available on the system path.
+Expects drush (with islandora_datastreams_crud), convert (provided by imagemagick), and xslt3 (`npm install -g xslt3`) to be available on the system path.
+
+## alto_to_hocr.sef.json
+
+This is a compiled xslt produced by running xslt3 on https://github.com/filak/hOCR-to-ALTO/blob/master/alto__hocr.xsl

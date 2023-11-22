@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Xsl;
@@ -46,6 +47,12 @@ async Task ProcessDocument(ProcessOptions options)
 
 async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
 {
+    var commandName = startInfo.FileName;    
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+    {
+        startInfo.FileName = "cmd";
+        startInfo.Arguments = $"/c {commandName} {startInfo.Arguments}";
+    }
     startInfo.CreateNoWindow = true;
     startInfo.RedirectStandardError = true;
     var process = new Process {StartInfo = startInfo};
@@ -53,13 +60,13 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     process.ErrorDataReceived += (_, args) => { errorOutput += Environment.NewLine + args.Data; };
     if (!process.Start())
     {
-        throw new Exception($"Failed to start {startInfo.FileName} process.");
+        throw new Exception($"Failed to start {commandName} process.");
     }
     process.BeginErrorReadLine();
     await process.WaitForExitAsync();
-    if (!string.IsNullOrWhiteSpace(errorOutput))
+    if (process.ExitCode != 0)
     {
-        throw new Exception($"{startInfo.FileName} process errored:" + errorOutput);
+        throw new Exception($"{commandName} process errored with code {process.ExitCode}{(string.IsNullOrWhiteSpace(errorOutput) ? "." : ": " + errorOutput)}");
     }
 }
 
@@ -131,22 +138,23 @@ async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool o
 
 async Task CheckProgress(CheckOptions options)
 {
+    var altoDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_altos"));
     var hocrDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_hocrs"));
     try
     {
-        await GetAndConvertTranskribusHocr(hocrDirectory);
+        await GetAndConvertTranskribusHocr(altoDirectory, hocrDirectory);
         await PushHocrDatastreams(options, hocrDirectory);
         await database.SaveChangesAsync();
     }
     finally
     {
+        altoDirectory.Delete(recursive: true);
         hocrDirectory.Delete(recursive: true);
     }
 }
 
-async Task GetAndConvertTranskribusHocr(DirectoryInfo hocrDirectory, DirectoryInfo altoDirectory = null)
+async Task GetAndConvertTranskribusHocr(DirectoryInfo altoDirectory, DirectoryInfo hocrDirectory)
 {
-    var xslt = LoadXslt();
     foreach (var page in database.Pages.Where(p => p.InProgress))
     {
         var status = await transkribusClient.GetProcessStatus(page.ProcessId);
@@ -155,25 +163,16 @@ async Task GetAndConvertTranskribusHocr(DirectoryInfo hocrDirectory, DirectoryIn
             continue;
         }
         var altoXml = await transkribusClient.GetAltoXml(page.ProcessId);
-        if (altoDirectory is not null)
-        {
-            var altoFileName = Path.Join(altoDirectory.FullName, page.Pid + "_ALTO.xml");
-            altoXml.Save(File.OpenWrite(altoFileName));            
-        }
+        var altoFileName = Path.Join(altoDirectory.FullName, page.Pid + "_ALTO.xml");
+        altoXml.Save(File.OpenWrite(altoFileName));
         var hocrFileName = Path.Join(hocrDirectory.FullName, page.Pid + "_HOCR.shtml");
-        xslt.Transform(altoXml.CreateReader(), XmlWriter.Create(hocrFileName));
+        await RunProcessAndCaptureErrors(new ProcessStartInfo
+        {
+            FileName = "xslt3",
+            Arguments = $"-xsl:alto_to_hocr.sef.json -s:{altoFileName} -o:{hocrFileName}"
+        });
         page.InProgress = false;
     }
-}
-
-XslCompiledTransform LoadXslt()
-{
-    var stream = Assembly.GetExecutingAssembly()
-        .GetManifestResourceStream("transkribus_process.hOCR_to_ALTO.alto__hocr.xsl");
-    var reader = XmlReader.Create(stream);
-    var transformer = new XslCompiledTransform(enableDebug: true);
-    transformer.Load(reader);
-    return transformer; 
 }
 
 async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirectory)
@@ -203,10 +202,13 @@ async Task TestXslt(TestXsltOptions options)
 {
     var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
     var altoDirectory = new DirectoryInfo(options.AltoDirectory);
-    var xslt = LoadXslt();
     foreach (var altoXml in altoDirectory.EnumerateFiles())
     {
         var hocrFileName = Path.Join(hocrDirectory.FullName, altoXml.Name.Replace("_ALTO.xml", "_HOCR.shtml"));
-        xslt.Transform(XmlReader.Create(altoXml.OpenText()), XmlWriter.Create(hocrFileName));
+        await RunProcessAndCaptureErrors(new ProcessStartInfo
+        {
+            FileName = "xslt3",
+            Arguments = $"-xsl:alto_to_hocr.sef.json -s:{altoXml.FullName} -o:{hocrFileName}"
+        });
     }
 }

@@ -17,13 +17,14 @@ class Database : DbContext
 
     protected override void OnModelCreating(ModelBuilder model)
     {
-        model.Entity<Page>().HasKey(p => p.Pid);
+        model.Entity<Page>().HasKey(p => p.ProcessId);
     }
 }
 
 class Page
 {
     public string Pid { get; set; }
+    public int HtrId { get; set; }
     public int ProcessId { get; set;}
     public bool InProgress { get; set; }
 }

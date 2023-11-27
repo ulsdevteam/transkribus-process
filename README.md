@@ -9,3 +9,5 @@ Expects drush (with islandora_datastreams_crud), convert (provided by imagemagic
 ## alto_to_hocr.sef.json
 
 This is a compiled xslt produced by running xslt3 on https://github.com/filak/hOCR-to-ALTO/blob/master/alto__hocr.xsl
+
+`xslt3 -xsl:../hOCR-to-ALTO/alto__hocr.xsl -export:alto_to_hocr.sef.json -relocate:on -nogo`

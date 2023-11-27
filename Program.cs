@@ -1,12 +1,8 @@
 ﻿using System.Diagnostics;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using System.Xml;
-using System.Xml.Xsl;
 using CommandLine;
 using dotenv.net;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
 DotEnv.Load();
@@ -36,7 +32,7 @@ async Task ProcessDocument(ProcessOptions options)
         await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
     }
     finally
-    {        
+    {
         if (pidFilePath is not null)
         {
             File.Delete(pidFilePath);
@@ -47,7 +43,7 @@ async Task ProcessDocument(ProcessOptions options)
 
 async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
 {
-    var commandName = startInfo.FileName;    
+    var commandName = startInfo.FileName;
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {
         startInfo.FileName = "cmd";
@@ -55,7 +51,7 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     }
     startInfo.CreateNoWindow = true;
     startInfo.RedirectStandardError = true;
-    var process = new Process {StartInfo = startInfo};
+    var process = new Process { StartInfo = startInfo };
     var errorOutput = string.Empty;
     process.ErrorDataReceived += (_, args) => { errorOutput += Environment.NewLine + args.Data; };
     if (!process.Start())
@@ -118,10 +114,14 @@ async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool o
     foreach (var file in jpgDirectory.EnumerateFiles())
     {
         var pid = Regex.Replace(file.Name, "_JP2.jpg$", "");
-        if (!overwrite && database.Pages.FirstOrDefault(p => p.Pid == pid) is Page existingPage)
+        if (!overwrite && database.Pages.Where(p => p.Pid == pid).ToList() is List<Page> existingPages && existingPages.Any())
         {
-            Console.Error.WriteLine($"Page {pid} has already been uploaded to Transkribus {(existingPage.InProgress ? "and is currently processing" : "and HOCR datastreams have already been pushed")}.");
-            Console.Error.WriteLine("Run again with the --overwrite flag to disregard this and re-upload them.");
+            Console.Error.WriteLine(
+                $"Page {pid} has already been uploaded to Transkribus " +
+                string.Join(", ", existingPages.Select(existingPage =>
+                    (existingPage.HtrId == htrId ? "with the same model " : $"with another model ({existingPage.HtrId}) ") +
+                    (existingPage.InProgress ? "and is currently processing" : "and HOCR datastreams have already been pushed"))) + ".");
+            Console.Error.WriteLine("Run with the --overwrite flag to disregard this and re-upload them.");
             continue;
         }
         var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file.FullName));
@@ -129,6 +129,7 @@ async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool o
         database.Pages.Add(new Page
         {
             Pid = pid,
+            HtrId = htrId,
             ProcessId = processId,
             InProgress = true
         });
@@ -169,7 +170,7 @@ async Task GetAndConvertTranskribusHocr(DirectoryInfo altoDirectory, DirectoryIn
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
             FileName = "xslt3",
-            Arguments = $"-xsl:alto_to_hocr.sef.json -s:{altoFileName} -o:{hocrFileName}"
+            Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoFileName} -o:{hocrFileName}"
         });
         page.InProgress = false;
     }
@@ -177,7 +178,7 @@ async Task GetAndConvertTranskribusHocr(DirectoryInfo altoDirectory, DirectoryIn
 
 async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirectory)
 {
-    await RunProcessAndCaptureErrors(new ProcessStartInfo 
+    await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
         Arguments = $"--root={options.Root} --user=$USER --uri={options.Uri} idcrudpd --datastreams_source_directory={hocrDirectory.FullName}"
@@ -208,7 +209,7 @@ async Task TestXslt(TestXsltOptions options)
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
             FileName = "xslt3",
-            Arguments = $"-xsl:alto_to_hocr.sef.json -s:{altoXml.FullName} -o:{hocrFileName}"
+            Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoXml.FullName} -o:{hocrFileName}"
         });
     }
 }

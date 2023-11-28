@@ -18,6 +18,7 @@ class Database : DbContext
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Page>().HasKey(p => p.ProcessId);
+        model.Entity<Page>().HasIndex(p => p.InProgress);
     }
 }
 

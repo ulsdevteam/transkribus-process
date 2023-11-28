@@ -24,17 +24,39 @@ await Parser.Default.ParseArguments<ProcessOptions, CheckOptions, TestUploadOpti
 async Task ProcessDocument(ProcessOptions options)
 {
     var pidFilePath = Path.GetTempFileName();
+    var jp2Directory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_jp2s"));
     var jpgDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_jpgs"));
     try
     {
         await GetPagePids(options, pidFilePath);
-        await GetAndConvertImageDatastreams(options, pidFilePath, jpgDirectory);
+        await GetJp2Datastreams(options, pidFilePath, jp2Directory);
+        await ConvertJp2sToJpgs(jp2Directory, jpgDirectory);
         await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
     }
     finally
     {
         File.Delete(pidFilePath);
+        jp2Directory.Delete(recursive: true);
         jpgDirectory.Delete(recursive: true);
+    }
+}
+
+async Task CheckProgress(CheckOptions options)
+{
+    var altoDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_altos"));;
+    var hocrDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_hocrs"));;
+    try
+    {
+        await GetTranskribusAltoXml(altoDirectory);
+        if (!database.ChangeTracker.HasChanges()) { return; }
+        await ConvertAltoToHocr(altoDirectory, hocrDirectory);
+        await PushHocrDatastreams(options, hocrDirectory);
+        await database.SaveChangesAsync();
+    }
+    finally
+    {
+        altoDirectory.Delete(recursive: true);
+        hocrDirectory.Delete(recursive: true);
     }
 }
 
@@ -72,28 +94,24 @@ async Task GetPagePids(ProcessOptions options, string pidFilePath)
     });
 }
 
-async Task GetAndConvertImageDatastreams(IdCrudOptions options, string pidFilePath, DirectoryInfo jpgDirectory)
+async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath, DirectoryInfo jp2Directory)
 {
-    var jp2Directory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_jp2s"));
-    try
+    await RunProcessAndCaptureErrors(new ProcessStartInfo
+    {
+        FileName = "drush",
+        Arguments = $"--root={options.Root} --user=$USER --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory.FullName} --dsid=JP2"
+    });
+}
+
+async Task ConvertJp2sToJpgs(DirectoryInfo jp2Directory, DirectoryInfo jpgDirectory)
+{
+    foreach (var jp2file in jp2Directory.EnumerateFiles())
     {
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
-            FileName = "drush",
-            Arguments = $"--root={options.Root} --user=$USER --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory.FullName} --dsid=JP2"
+            FileName = "convert",
+            Arguments = $"{jp2file.FullName} {Path.Join(jpgDirectory.FullName, Path.GetFileNameWithoutExtension(jp2file.Name) + ".jpg")}"
         });
-        foreach (var jp2file in jp2Directory.EnumerateFiles())
-        {
-            await RunProcessAndCaptureErrors(new ProcessStartInfo
-            {
-                FileName = "convert",
-                Arguments = $"{jp2file.FullName} {Path.Join(jpgDirectory.FullName, Path.GetFileNameWithoutExtension(jp2file.Name) + ".jpg")}"
-            });
-        }
-    }
-    finally
-    {
-        jp2Directory.Delete(recursive: true);
     }
 }
 
@@ -122,24 +140,6 @@ async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool o
             InProgress = true
         });
         await database.SaveChangesAsync();
-    }
-}
-
-async Task CheckProgress(CheckOptions options)
-{
-    var altoDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_altos"));;
-    var hocrDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_hocrs"));;
-    try
-    {
-        await GetTranskribusAltoXml(altoDirectory);
-        await ConvertAltoToHocr(altoDirectory, hocrDirectory);
-        await PushHocrDatastreams(options, hocrDirectory);
-        await database.SaveChangesAsync();
-    }
-    finally
-    {
-        altoDirectory.Delete(recursive: true);
-        hocrDirectory.Delete(recursive: true);
     }
 }
 

@@ -7,6 +7,9 @@ abstract class IdCrudOptions
 
     [Option]
     public string Uri { get; set; }
+
+    [Option]
+    public string User { get; set; }
 }
 
 

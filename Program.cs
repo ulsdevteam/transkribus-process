@@ -90,7 +90,7 @@ async Task GetPagePids(ProcessOptions options, string pidFilePath)
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user=$USER --uri={options.Uri} idcrudfp --solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{options.Pid.Replace(":", "\\:")}\" --pid_file={pidFilePath}"
+        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfp --solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{options.Pid.Replace(":", "\\:")}\" --pid_file={pidFilePath}"
     });
 }
 
@@ -99,7 +99,7 @@ async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath, Director
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user=$USER --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory.FullName} --dsid=JP2"
+        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory.FullName} --dsid=JP2"
     });
 }
 
@@ -177,7 +177,7 @@ async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirector
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user=$USER --uri={options.Uri} idcrudpd --datastreams_source_directory={hocrDirectory.FullName}"
+        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudpd --datastreams_source_directory={hocrDirectory.FullName}"
     });
 }
 

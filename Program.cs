@@ -1,6 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 using CommandLine;
 using dotenv.net;
 using Microsoft.Extensions.Configuration;
@@ -50,6 +53,7 @@ async Task CheckProgress(CheckOptions options)
         await GetTranskribusAltoXml(altoDirectory);
         if (!database.ChangeTracker.HasChanges()) { return; }
         await ConvertAltoToHocr(altoDirectory, hocrDirectory);
+        FixHocrFiles(hocrDirectory);
         await PushHocrDatastreams(options, hocrDirectory);
         await database.SaveChangesAsync();
     }
@@ -172,6 +176,27 @@ async Task ConvertAltoToHocr(DirectoryInfo altoDirectory, DirectoryInfo hocrDire
     }
 }
 
+void FixHocrFiles(DirectoryInfo hocrDirectory)
+{
+    foreach (var hocrFile in hocrDirectory.EnumerateFiles())
+    {
+        var readStream = hocrFile.OpenRead();
+        var xml = XDocument.Load(readStream);
+        readStream.Close();
+        XNamespace ns = "http://www.w3.org/1999/xhtml";
+        var head = xml.Element(ns + "html").Element(ns + "head");
+        head.Element(ns + "title").Value = "Image: " + Regex.Replace(hocrFile.Name, "_HOCR.shtml$", "_JP2.jpg");
+        head.Add(new XElement(ns + "meta", new XAttribute("name", "ocr-system"), new XAttribute("content", "Transkribus")));
+        var writer = XmlWriter.Create(hocrFile.Open(FileMode.Truncate), new XmlWriterSettings 
+        {
+            Encoding = new UTF8Encoding(false), 
+            Indent = true
+        });
+        xml.Save(writer);
+        writer.Close();
+    }
+}
+
 async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirectory)
 {
     await RunProcessAndCaptureErrors(new ProcessStartInfo
@@ -209,4 +234,5 @@ async Task TestXslt(TestXsltOptions options)
             Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoXml.FullName} -o:{hocrFileName}"
         });
     }
+    FixHocrFiles(hocrDirectory);
 }

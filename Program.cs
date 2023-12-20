@@ -15,20 +15,29 @@ var config = new ConfigurationBuilder()
 var database = new Database(config["DATABASE_PATH"]);
 await database.Database.EnsureCreatedAsync();
 var transkribusClient = new TranskribusClient(config["TRANSKRIBUS_USERNAME"], config["TRANSKRIBUS_PASSWORD"]);
-await Parser.Default.ParseArguments<ProcessOptions, CheckOptions, TestUploadOptions, TestDownloadOptions, TestXsltOptions>(args).MapResult(
+var uuid = Guid.NewGuid();
+await Parser.Default.ParseArguments<ProcessOptions, UploadOptions, CheckOptions>(args).MapResult(
     (ProcessOptions options) => ProcessDocument(options),
+    (UploadOptions options) => UploadDocument(options),
     (CheckOptions options) => CheckProgress(options),
-    (TestUploadOptions options) => TestWithJpgs(options),
-    (TestDownloadOptions options) => TestDownload(options),
-    (TestXsltOptions options) => TestXslt(options),
     (errors) => Task.CompletedTask
 );
 
 async Task ProcessDocument(ProcessOptions options)
 {
+    await UploadDocument(options);
+    await Task.Delay(TimeSpan.FromSeconds(15));
+    while (database.Pages.Any(p => p.InProgress)) 
+    {
+        await CheckProgress(options);
+    }
+}
+
+async Task UploadDocument(UploadOptions options)
+{
     var pidFilePath = Path.GetTempFileName();
-    var jp2Directory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_jp2s"));
-    var jpgDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_jpgs"));
+    var jp2Directory = Directory.CreateDirectory(TempDirPath("jp2s"));
+    var jpgDirectory = Directory.CreateDirectory(TempDirPath("jpgs"));
     try
     {
         await GetPagePids(options, pidFilePath);
@@ -44,10 +53,10 @@ async Task ProcessDocument(ProcessOptions options)
     }
 }
 
-async Task CheckProgress(CheckOptions options)
+async Task CheckProgress(IdCrudOptions options)
 {
-    var altoDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_altos"));;
-    var hocrDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), "transkribus_process_hocrs"));;
+    var altoDirectory = Directory.CreateDirectory(TempDirPath("altos"));
+    var hocrDirectory = Directory.CreateDirectory(TempDirPath("hocrs"));
     try
     {
         await GetTranskribusAltoXml(altoDirectory);
@@ -63,6 +72,8 @@ async Task CheckProgress(CheckOptions options)
         hocrDirectory.Delete(recursive: true);
     }
 }
+
+string TempDirPath(string label) => Path.Join(Path.GetTempPath(), $"transkribus_process_{label}_{uuid:N}");
 
 async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
 {
@@ -89,8 +100,9 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     }
 }
 
-async Task GetPagePids(ProcessOptions options, string pidFilePath)
+async Task GetPagePids(UploadOptions options, string pidFilePath)
 {
+    Console.WriteLine($"Getting page PIDs from {options.Pid}...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
@@ -100,6 +112,7 @@ async Task GetPagePids(ProcessOptions options, string pidFilePath)
 
 async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath, DirectoryInfo jp2Directory)
 {
+    Console.WriteLine("Fetching jp2 datastreams...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
@@ -109,6 +122,7 @@ async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath, Director
 
 async Task ConvertJp2sToJpgs(DirectoryInfo jp2Directory, DirectoryInfo jpgDirectory)
 {
+    Console.WriteLine("Converting jp2s to jpgs...");
     foreach (var jp2file in jp2Directory.EnumerateFiles())
     {
         await RunProcessAndCaptureErrors(new ProcessStartInfo
@@ -121,6 +135,7 @@ async Task ConvertJp2sToJpgs(DirectoryInfo jp2Directory, DirectoryInfo jpgDirect
 
 async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool overwrite = false)
 {
+    Console.WriteLine("Uploading images to Transkribus...");
     foreach (var file in jpgDirectory.EnumerateFiles())
     {
         var pid = Regex.Replace(file.Name, "_JP2.jpg$", "");
@@ -149,6 +164,7 @@ async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool o
 
 async Task GetTranskribusAltoXml(DirectoryInfo altoDirectory)
 {    
+    Console.WriteLine("Checking for finished pages...");
     foreach (var page in database.Pages.Where(p => p.InProgress))
     {
         var status = await transkribusClient.GetProcessStatus(page.ProcessId);
@@ -156,6 +172,7 @@ async Task GetTranskribusAltoXml(DirectoryInfo altoDirectory)
         {
             continue;
         }
+        Console.WriteLine($"{page.Pid} is done processing, downloading...");
         var altoXml = await transkribusClient.GetAltoXml(page.ProcessId);
         var altoFileName = Path.Join(altoDirectory.FullName, page.Pid + "_ALTO.xml");
         altoXml.Save(File.OpenWrite(altoFileName));
@@ -165,6 +182,7 @@ async Task GetTranskribusAltoXml(DirectoryInfo altoDirectory)
 
 async Task ConvertAltoToHocr(DirectoryInfo altoDirectory, DirectoryInfo hocrDirectory)
 {
+    Console.WriteLine("Converting ALTO XML to hOCR...");
     foreach (var altoFile in altoDirectory.EnumerateFiles())
     {
         var hocrFileName = Path.Join(hocrDirectory.FullName, Regex.Replace(altoFile.Name, "_ALTO.xml$", "_HOCR.shtml"));
@@ -178,6 +196,7 @@ async Task ConvertAltoToHocr(DirectoryInfo altoDirectory, DirectoryInfo hocrDire
 
 void FixHocrFiles(DirectoryInfo hocrDirectory)
 {
+    Console.WriteLine("Fixing hOCR file headers...");
     foreach (var hocrFile in hocrDirectory.EnumerateFiles())
     {
         var readStream = hocrFile.OpenRead();
@@ -199,6 +218,7 @@ void FixHocrFiles(DirectoryInfo hocrDirectory)
 
 async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirectory)
 {
+    Console.WriteLine("Pushing hOCR datastreams to Islandora...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
@@ -206,33 +226,33 @@ async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirector
     });
 }
 
-async Task TestWithJpgs(TestUploadOptions options)
-{
-    var jpgDirectory = new DirectoryInfo(options.JpgDirectory);
-    await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
-}
+// async Task TestWithJpgs(TestUploadOptions options)
+// {
+//     var jpgDirectory = new DirectoryInfo(options.JpgDirectory);
+//     await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
+// }
 
-async Task TestDownload(TestDownloadOptions options)
-{
-    var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
-    var altoDirectory = new DirectoryInfo(options.AltoDirectory);
-    await GetTranskribusAltoXml(altoDirectory);
-    await ConvertAltoToHocr(altoDirectory, hocrDirectory);
-    await database.SaveChangesAsync();
-}
+// async Task TestDownload(TestDownloadOptions options)
+// {
+//     var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
+//     var altoDirectory = new DirectoryInfo(options.AltoDirectory);
+//     await GetTranskribusAltoXml(altoDirectory);
+//     await ConvertAltoToHocr(altoDirectory, hocrDirectory);
+//     await database.SaveChangesAsync();
+// }
 
-async Task TestXslt(TestXsltOptions options)
-{
-    var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
-    var altoDirectory = new DirectoryInfo(options.AltoDirectory);
-    foreach (var altoXml in altoDirectory.EnumerateFiles())
-    {
-        var hocrFileName = Path.Join(hocrDirectory.FullName, altoXml.Name.Replace("_ALTO.xml", "_HOCR.shtml"));
-        await RunProcessAndCaptureErrors(new ProcessStartInfo
-        {
-            FileName = "xslt3",
-            Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoXml.FullName} -o:{hocrFileName}"
-        });
-    }
-    FixHocrFiles(hocrDirectory);
-}
+// async Task TestXslt(TestXsltOptions options)
+// {
+//     var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
+//     var altoDirectory = new DirectoryInfo(options.AltoDirectory);
+//     foreach (var altoXml in altoDirectory.EnumerateFiles())
+//     {
+//         var hocrFileName = Path.Join(hocrDirectory.FullName, altoXml.Name.Replace("_ALTO.xml", "_HOCR.shtml"));
+//         await RunProcessAndCaptureErrors(new ProcessStartInfo
+//         {
+//             FileName = "xslt3",
+//             Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoXml.FullName} -o:{hocrFileName}"
+//         });
+//     }
+//     FixHocrFiles(hocrDirectory);
+// }

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -15,7 +15,13 @@ var config = new ConfigurationBuilder()
 var database = new Database(config["DATABASE_PATH"]);
 await database.Database.EnsureCreatedAsync();
 var transkribusClient = new TranskribusClient(config["TRANSKRIBUS_USERNAME"], config["TRANSKRIBUS_PASSWORD"]);
+// Define paths for temp folders, a uuid is included in case there are multiple instances running simultaneously
 var uuid = Guid.NewGuid();
+string TempDirPath(string label) => Path.Join(Path.GetTempPath(), $"transkribus_process_{label}_{uuid:N}");
+var jp2Directory = TempDirPath("jp2s");
+var jpgDirectory = TempDirPath("jpgs");
+var altoDirectory = TempDirPath("altos");
+var hocrDirectory = TempDirPath("hocrs");
 await Parser.Default.ParseArguments<ProcessOptions, UploadOptions, CheckOptions>(args).MapResult(
     (ProcessOptions options) => ProcessDocument(options),
     (UploadOptions options) => UploadDocument(options),
@@ -35,45 +41,52 @@ async Task ProcessDocument(ProcessOptions options)
 
 async Task UploadDocument(UploadOptions options)
 {
-    var pidFilePath = Path.GetTempFileName();
-    var jp2Directory = Directory.CreateDirectory(TempDirPath("jp2s"));
-    var jpgDirectory = Directory.CreateDirectory(TempDirPath("jpgs"));
+    string pidFilePath = null;
     try
     {
-        await GetPagePids(options, pidFilePath);
-        await GetJp2Datastreams(options, pidFilePath, jp2Directory);
-        await ConvertJp2sToJpgs(jp2Directory, jpgDirectory);
-        await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
+        pidFilePath = await GetPagePids(options);
+        await GetJp2Datastreams(options, pidFilePath);
+        await ConvertJp2sToJpgs();
+        await SendImagesToTranskribus(options.HtrId, options.Overwrite);
     }
     finally
     {
-        File.Delete(pidFilePath);
-        jp2Directory.Delete(recursive: true);
-        jpgDirectory.Delete(recursive: true);
+        if (pidFilePath is not null) File.Delete(pidFilePath);        
+        DeleteDirectoryIfExists(jp2Directory);
+        DeleteDirectoryIfExists(jpgDirectory);
     }
 }
 
 async Task CheckProgress(IdCrudOptions options)
 {
-    var altoDirectory = Directory.CreateDirectory(TempDirPath("altos"));
-    var hocrDirectory = Directory.CreateDirectory(TempDirPath("hocrs"));
     try
     {
-        await GetTranskribusAltoXml(altoDirectory);
+        await GetTranskribusAltoXml();
         if (!database.ChangeTracker.HasChanges()) { return; }
-        await ConvertAltoToHocr(altoDirectory, hocrDirectory);
-        FixHocrFiles(hocrDirectory);
-        await PushHocrDatastreams(options, hocrDirectory);
+        await ConvertAltoToHocr();
+        FixHocrFiles();
+        await PushHocrDatastreams(options);
         await database.SaveChangesAsync();
     }
     finally
     {
-        altoDirectory.Delete(recursive: true);
-        hocrDirectory.Delete(recursive: true);
+        DeleteDirectoryIfExists(altoDirectory);
+        DeleteDirectoryIfExists(hocrDirectory);
     }
 }
 
-string TempDirPath(string label) => Path.Join(Path.GetTempPath(), $"transkribus_process_{label}_{uuid:N}");
+
+void DeleteDirectoryIfExists(string path)
+{
+    try
+    {
+        Directory.Delete(path, true);
+    }
+    catch (DirectoryNotFoundException)
+    {
+        // this space intentionally left blank
+    }
+}
 
 async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
 {
@@ -86,8 +99,8 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     startInfo.CreateNoWindow = true;
     startInfo.RedirectStandardError = true;
     var process = new Process { StartInfo = startInfo };
-    var errorOutput = string.Empty;
-    process.ErrorDataReceived += (_, args) => { errorOutput += Environment.NewLine + args.Data; };
+    var errorOutput = new StringBuilder();
+    process.ErrorDataReceived += (_, args) => errorOutput.AppendLine(args.Data);
     if (!process.Start())
     {
         throw new Exception($"Failed to start {commandName} process.");
@@ -96,49 +109,52 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     await process.WaitForExitAsync();
     if (process.ExitCode != 0)
     {
-        throw new Exception($"{commandName} process errored with code {process.ExitCode}{(string.IsNullOrWhiteSpace(errorOutput) ? "." : ": " + errorOutput)}");
+        throw new Exception($"{commandName} process errored with code {process.ExitCode}{(errorOutput.Length == 0 ? "." : ": " + errorOutput)}");
     }
 }
 
-async Task GetPagePids(UploadOptions options, string pidFilePath)
+async Task<string> GetPagePids(UploadOptions options)
 {
+    var pidFilePath = Path.GetTempFileName();
     Console.WriteLine($"Getting page PIDs from {options.Pid}...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
         Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfp --solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{options.Pid.Replace(":", "\\:")}\" --pid_file={pidFilePath}"
     });
+    return pidFilePath;
 }
 
-async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath, DirectoryInfo jp2Directory)
+async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath)
 {
     Console.WriteLine("Fetching jp2 datastreams...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory.FullName} --dsid=JP2"
+        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory} --dsid=JP2"
     });
 }
 
-async Task ConvertJp2sToJpgs(DirectoryInfo jp2Directory, DirectoryInfo jpgDirectory)
+async Task ConvertJp2sToJpgs()
 {
     Console.WriteLine("Converting jp2s to jpgs...");
-    foreach (var jp2file in jp2Directory.EnumerateFiles())
+    Directory.CreateDirectory(jpgDirectory);
+    foreach (var jp2file in Directory.EnumerateFiles(jp2Directory))
     {
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
             FileName = "convert",
-            Arguments = $"{jp2file.FullName} {Path.Join(jpgDirectory.FullName, Path.GetFileNameWithoutExtension(jp2file.Name) + ".jpg")}"
+            Arguments = $"{jp2file} {Path.Join(jpgDirectory, Path.GetFileNameWithoutExtension(jp2file) + ".jpg")}"
         });
     }
 }
 
-async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool overwrite = false)
+async Task SendImagesToTranskribus(int htrId, bool overwrite = false)
 {
     Console.WriteLine("Uploading images to Transkribus...");
-    foreach (var file in jpgDirectory.EnumerateFiles())
+    foreach (var file in Directory.EnumerateFiles(jpgDirectory))
     {
-        var pid = Regex.Replace(file.Name, "_JP2.jpg$", "");
+        var pid = Regex.Replace(Path.GetFileName(file), "_JP2.jpg$", "");
         if (!overwrite && database.Pages.Where(p => p.Pid == pid).ToList() is List<Page> existingPages && existingPages.Any())
         {
             Console.Error.WriteLine(
@@ -149,7 +165,7 @@ async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool o
             Console.Error.WriteLine("Run with the --overwrite flag to disregard this and re-upload them.");
             continue;
         }
-        var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file.FullName));
+        var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file));
         var processId = await transkribusClient.Process(htrId, imageBase64);
         database.Pages.Add(new Page
         {
@@ -162,9 +178,10 @@ async Task SendImagesToTranskribus(DirectoryInfo jpgDirectory, int htrId, bool o
     }
 }
 
-async Task GetTranskribusAltoXml(DirectoryInfo altoDirectory)
+async Task GetTranskribusAltoXml()
 {    
     Console.WriteLine("Checking for finished pages...");
+    Directory.CreateDirectory(altoDirectory);
     foreach (var page in database.Pages.Where(p => p.InProgress))
     {
         var status = await transkribusClient.GetProcessStatus(page.ProcessId);
@@ -174,40 +191,40 @@ async Task GetTranskribusAltoXml(DirectoryInfo altoDirectory)
         }
         Console.WriteLine($"{page.Pid} is done processing, downloading...");
         var altoXml = await transkribusClient.GetAltoXml(page.ProcessId);
-        var altoFileName = Path.Join(altoDirectory.FullName, page.Pid + "_ALTO.xml");
-        altoXml.Save(File.OpenWrite(altoFileName));
+        var altoFile = Path.Join(altoDirectory, page.Pid + "_ALTO.xml");
+        altoXml.Save(File.OpenWrite(altoFile));
         page.InProgress = false;
     }    
 }
 
-async Task ConvertAltoToHocr(DirectoryInfo altoDirectory, DirectoryInfo hocrDirectory)
+async Task ConvertAltoToHocr()
 {
     Console.WriteLine("Converting ALTO XML to hOCR...");
-    foreach (var altoFile in altoDirectory.EnumerateFiles())
+    Directory.CreateDirectory(hocrDirectory);
+    foreach (var altoFile in Directory.EnumerateFiles(altoDirectory))
     {
-        var hocrFileName = Path.Join(hocrDirectory.FullName, Regex.Replace(altoFile.Name, "_ALTO.xml$", "_HOCR.shtml"));
+        var hocrFile = Path.Join(hocrDirectory, Regex.Replace(altoFile, "_ALTO.xml$", "_HOCR.shtml"));
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
             FileName = "xslt3",
-            Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoFile.FullName} -o:{hocrFileName}"
+            Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoFile} -o:{hocrFile}"
         });
     }
 }
 
-void FixHocrFiles(DirectoryInfo hocrDirectory)
+void FixHocrFiles()
 {
     Console.WriteLine("Fixing hOCR file headers...");
-    foreach (var hocrFile in hocrDirectory.EnumerateFiles())
+    foreach (var hocrFile in Directory.EnumerateFiles(hocrDirectory))
     {
-        var readStream = hocrFile.OpenRead();
-        var xml = XDocument.Load(readStream);
-        readStream.Close();
+        var xml = XDocument.Load(hocrFile);
         XNamespace ns = "http://www.w3.org/1999/xhtml";
         var head = xml.Element(ns + "html").Element(ns + "head");
-        head.Element(ns + "title").Value = "Image: " + Regex.Replace(hocrFile.Name, "_HOCR.shtml$", "_JP2.jpg");
+        head.Element(ns + "title").Value = "Image: " + Regex.Replace(hocrFile, "_HOCR.shtml$", "_JP2.jpg");
         head.Add(new XElement(ns + "meta", new XAttribute("name", "ocr-system"), new XAttribute("content", "Transkribus")));
-        var writer = XmlWriter.Create(hocrFile.Open(FileMode.Truncate), new XmlWriterSettings 
+        var writer = XmlWriter.Create(File.Open(hocrFile, FileMode.Truncate), new XmlWriterSettings 
         {
+            // need to specify false here to stop it from emitting a byte order mark
             Encoding = new UTF8Encoding(false), 
             Indent = true
         });
@@ -216,13 +233,13 @@ void FixHocrFiles(DirectoryInfo hocrDirectory)
     }
 }
 
-async Task PushHocrDatastreams(IdCrudOptions options, DirectoryInfo hocrDirectory)
+async Task PushHocrDatastreams(IdCrudOptions options)
 {
     Console.WriteLine("Pushing hOCR datastreams to Islandora...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudpd --datastreams_source_directory={hocrDirectory.FullName}"
+        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudpd --datastreams_source_directory={hocrDirectory}"
     });
 }
 

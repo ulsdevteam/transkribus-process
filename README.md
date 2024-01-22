@@ -11,3 +11,8 @@ Expects drush (with islandora_datastreams_crud), convert (provided by imagemagic
 This is a compiled xslt produced by running xslt3 on https://github.com/filak/hOCR-to-ALTO/blob/master/alto__hocr.xsl
 
 `xslt3 -xsl:../hOCR-to-ALTO/alto__hocr.xsl -export:alto_to_hocr.sef.json -relocate:on -nogo`
+
+## Building
+
+Building a Linux executable on Windows:
+`dotnet publish --os linux -p:PublishSingleFile=true --self-contained true`

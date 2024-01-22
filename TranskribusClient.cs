@@ -1,15 +1,14 @@
 using System.Xml.Linq;
 using Flurl.Http;
-using Flurl.Http.Configuration;
 using Flurl.Http.Xml;
 using Newtonsoft.Json;
-using Polly;
 
 class TranskribusClient
 {
     private FlurlClient Client { get; set; }
     private string Username { get; set; }
     private string Password { get; set; }
+    private Throttle Throttle { get; } = new Throttle(TimeSpan.FromSeconds(2));
     private AuthResponse AuthResponse { get; set; }
     private DateTimeOffset AuthResponseRetrieved { get; set; }
 
@@ -20,8 +19,6 @@ class TranskribusClient
     {
         Username = username;
         Password = password;
-        var rateLimit = Policy.RateLimitAsync(1, TimeSpan.FromSeconds(2));
-        FlurlHttp.Configure(settings => settings.HttpClientFactory = new PollyFactory(rateLimit.AsAsyncPolicy<HttpResponseMessage>()));
         Client = new FlurlClient(ApiUri).BeforeCall(call => Authorize(call.Request));
     }
 
@@ -29,7 +26,7 @@ class TranskribusClient
     {
         if (AuthResponse is null || AuthResponseRetrieved.AddSeconds(AuthResponse.RefreshExpiresIn) < DateTimeOffset.Now.AddMinutes(-5))
         {
-            AuthResponse = await AuthUri.PostUrlEncodedAsync(new 
+            AuthResponse = await AuthUri.PostUrlEncodedAsync(new
             {
                 username = Username,
                 password = Password,
@@ -53,31 +50,38 @@ class TranskribusClient
 
     public async Task<int> Process(int htrId, string imageBase64)
     {
-        var response = await Client.Request().PostJsonAsync(new {
-            config = new 
+        return await Throttle.RunThrottled(async () =>
+        {
+            var response = await Client.Request().PostJsonAsync(new
             {
-                textRecognition = new
+                config = new
                 {
-                    htrId
+                    textRecognition = new
+                    {
+                        htrId
+                    }
+                },
+                image = new
+                {
+                    base64 = imageBase64
                 }
-            },
-            image = new
-            {
-                base64 = imageBase64
-            }
-        }).ReceiveJson();
-        return (int) response.processId;
+            }).ReceiveJson();
+            return (int)response.processId;
+        });
     }
 
     public async Task<string> GetProcessStatus(int processId)
     {
-        var response = await Client.Request(processId).GetJsonAsync();
-        return response.status;
+        return await Throttle.RunThrottled(async () =>
+        {
+            var response = await Client.Request(processId).GetJsonAsync();
+            return response.status;
+        });
     }
 
     public async Task<XDocument> GetAltoXml(int processId)
     {
-        return await Client.Request(processId, "alto").GetXDocumentAsync();
+        return await Throttle.RunThrottled(() => Client.Request(processId, "alto").GetXDocumentAsync());
     }
 }
 
@@ -107,33 +111,4 @@ class AuthResponse
 
     [JsonProperty("scope")]
     public string Scope { get; set; }
-}
-
-// following boilerplate classes shamelessly copied from https://stackoverflow.com/questions/52272374/set-a-default-polly-policy-with-flurl/52284010#52284010
-class PollyHandler : DelegatingHandler
-{
-    private readonly IAsyncPolicy<HttpResponseMessage> _policy;
-
-    public PollyHandler(IAsyncPolicy<HttpResponseMessage> policy) {
-        _policy = policy;
-    }
-
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
-        return _policy.ExecuteAsync(ct => base.SendAsync(request, ct), cancellationToken);
-    }
-}
-
-class PollyFactory : DefaultHttpClientFactory
-{
-    private readonly IAsyncPolicy<HttpResponseMessage> _policy;
-
-    public PollyFactory(IAsyncPolicy<HttpResponseMessage> policy) {
-        _policy = policy;
-    }
-
-    public override HttpMessageHandler CreateMessageHandler() {
-        return new PollyHandler(_policy) {
-            InnerHandler = base.CreateMessageHandler()
-        };
-    }
 }

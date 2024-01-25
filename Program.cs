@@ -203,7 +203,7 @@ async Task ConvertAltoToHocr()
     Directory.CreateDirectory(hocrDirectory);
     foreach (var altoFile in Directory.EnumerateFiles(altoDirectory))
     {
-        var hocrFile = Path.Join(hocrDirectory, Regex.Replace(altoFile, "_ALTO.xml$", "_HOCR.shtml"));
+        var hocrFile = Path.Join(hocrDirectory, Regex.Replace(Path.GetFileName(altoFile), "_ALTO.xml$", "_HOCR.shtml"));
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
             FileName = "xslt3",
@@ -220,7 +220,7 @@ void FixHocrFiles()
         var xml = XDocument.Load(hocrFile);
         XNamespace ns = "http://www.w3.org/1999/xhtml";
         var head = xml.Element(ns + "html").Element(ns + "head");
-        head.Element(ns + "title").Value = "Image: " + Regex.Replace(hocrFile, "_HOCR.shtml$", "_JP2.jpg");
+        head.Element(ns + "title").Value = "Image: " + Regex.Replace(Path.GetFileName(hocrFile), "_HOCR.shtml$", "_JP2.jpg");
         head.Add(new XElement(ns + "meta", new XAttribute("name", "ocr-system"), new XAttribute("content", "Transkribus")));
         var writer = XmlWriter.Create(File.Open(hocrFile, FileMode.Truncate), new XmlWriterSettings 
         {

@@ -44,14 +44,17 @@ async Task UploadDocument(UploadOptions options)
     string pidFilePath = null;
     try
     {
-        pidFilePath = await GetPagePids(options);
+        pidFilePath = options.PidFile is null ? await GetPagePids(options) : Path.GetFullPath(options.PidFile);
         await GetJp2Datastreams(options, pidFilePath);
         await ConvertJp2sToJpgs();
         await SendImagesToTranskribus(options.HtrId, options.Overwrite);
     }
     finally
     {
-        if (pidFilePath is not null) File.Delete(pidFilePath);        
+        if (options.PidFile is null && pidFilePath is not null)
+        {
+            File.Delete(pidFilePath);        
+        }
         DeleteDirectoryIfExists(jp2Directory);
         DeleteDirectoryIfExists(jpgDirectory);
     }

@@ -21,8 +21,11 @@ class ProcessOptions : UploadOptions
 [Verb("upload")]
 class UploadOptions : IdCrudOptions
 {
-    [Option]
+    [Option(SetName = "pid")]
     public string Pid { get; set; }
+
+    [Option(SetName = "pidfile")]
+    public string PidFile { get; set; }
 
     [Option]
     public int HtrId { get; set; }

@@ -134,7 +134,7 @@ async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath)
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory} --dsid=JP2"
+        Arguments = $"-y --root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory} --dsid=JP2"
     });
 }
 

@@ -40,6 +40,26 @@ class CheckOptions : IdCrudOptions
 
 }
 
+[Verb("ocr")]
+class OcrOptions : IdCrudOptions
+{
+    [Option(SetName = "pid")]
+    public string Pid { get; set; }
+
+    [Option(SetName = "pidfile")]
+    public string PidFile { get; set; }
+}
+
+// [Verb("testocr")]
+// class TestOcrOptions
+// {
+//     [Option]
+//     public string HocrDirectory { get; set; }
+
+//     [Option]
+//     public string OcrDirectory { get; set; }
+// }
+
 // [Verb("testupload")]
 // class TestUploadOptions
 // {

@@ -22,10 +22,12 @@ var jp2Directory = TempDirPath("jp2s");
 var jpgDirectory = TempDirPath("jpgs");
 var altoDirectory = TempDirPath("altos");
 var hocrDirectory = TempDirPath("hocrs");
-await Parser.Default.ParseArguments<ProcessOptions, UploadOptions, CheckOptions>(args).MapResult(
+var ocrDirectory = TempDirPath("ocrs");
+await Parser.Default.ParseArguments<ProcessOptions, UploadOptions, CheckOptions, OcrOptions>(args).MapResult(
     (ProcessOptions options) => ProcessDocument(options),
     (UploadOptions options) => UploadDocument(options),
     (CheckOptions options) => CheckProgress(options),
+    (OcrOptions options) => CreateOcrDatastreamsFromHocr(options),
     (errors) => Task.CompletedTask
 );
 
@@ -44,7 +46,7 @@ async Task UploadDocument(UploadOptions options)
     string pidFilePath = null;
     try
     {
-        pidFilePath = options.PidFile is null ? await GetPagePids(options) : Path.GetFullPath(options.PidFile);
+        pidFilePath = options.PidFile is null ? await GetPagePids(options, options.Pid) : Path.GetFullPath(options.PidFile);
         await GetJp2Datastreams(options, pidFilePath);
         await ConvertJp2sToJpgs();
         await SendImagesToTranskribus(options.HtrId, options.Overwrite);
@@ -70,6 +72,8 @@ async Task CheckProgress(IdCrudOptions options)
         FixHocrFiles();
         await PushHocrDatastreams(options);
         await database.SaveChangesAsync();
+        GenerateOcrFiles();
+        await PushOcrDatastreams(options);
     }
     finally
     {
@@ -78,6 +82,26 @@ async Task CheckProgress(IdCrudOptions options)
     }
 }
 
+async Task CreateOcrDatastreamsFromHocr(OcrOptions options)
+{
+    string pidFilePath = null;
+    try
+    {
+        pidFilePath = options.PidFile is null ? await GetPagePids(options, options.Pid) : Path.GetFullPath(options.PidFile);
+        await GetHocrDatastreams(options, pidFilePath);
+        GenerateOcrFiles();
+        await PushOcrDatastreams(options);
+    }
+    finally
+    {
+        if (options.PidFile is null && pidFilePath is not null)
+        {
+            File.Delete(pidFilePath);        
+        }
+        DeleteDirectoryIfExists(hocrDirectory);
+        DeleteDirectoryIfExists(ocrDirectory);
+    }
+}
 
 void DeleteDirectoryIfExists(string path)
 {
@@ -116,14 +140,14 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     }
 }
 
-async Task<string> GetPagePids(UploadOptions options)
+async Task<string> GetPagePids(IdCrudOptions options, string pid)
 {
     var pidFilePath = Path.GetTempFileName();
-    Console.WriteLine($"Getting page PIDs from {options.Pid}...");
+    Console.WriteLine($"Getting page PIDs from {pid}...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfp --solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{options.Pid.Replace(":", "\\:")}\" --pid_file={pidFilePath}"
+        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfp --solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{pid.Replace(":", "\\:")}\" --pid_file={pidFilePath}"
     });
     return pidFilePath;
 }
@@ -236,9 +260,34 @@ void FixHocrFiles()
     }
 }
 
+void GenerateOcrFiles()
+{
+    Console.WriteLine("Generating OCR files from hOCR files...");
+    Directory.CreateDirectory(ocrDirectory);
+    foreach (var hocrFile in Directory.EnumerateFiles(hocrDirectory))
+    {
+        var xml = XDocument.Load(hocrFile);
+        var text = new StringBuilder();
+        XNamespace ns = "http://www.w3.org/1999/xhtml";
+        foreach (var paragraph in xml.Descendants(ns + "p"))
+        {
+            var lines = paragraph.Elements(ns + "span").Where(span => span.Attribute("class")?.Value == "ocr_line"); 
+            foreach (var line in lines) 
+            {
+                var words = line.Elements(ns + "span").Select(span => span.Value);
+                text.AppendJoin(' ', words);
+                text.AppendLine();
+            }
+            text.AppendLine();
+        }
+        var ocrFile = Path.Join(ocrDirectory, Regex.Replace(Path.GetFileName(hocrFile), "_HOCR.shtml$", "_OCR.asc"));
+        File.WriteAllText(ocrFile, text.ToString().Trim());
+    }
+}
+
 async Task PushHocrDatastreams(IdCrudOptions options)
 {
-    Console.WriteLine("Pushing hOCR datastreams to Islandora...");
+    Console.WriteLine("Pushing HOCR datastreams to Islandora...");
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
@@ -246,33 +295,60 @@ async Task PushHocrDatastreams(IdCrudOptions options)
     });
 }
 
+async Task GetHocrDatastreams(IdCrudOptions options, string pidFilePath)
+{
+    Console.WriteLine("Fetching HOCR datastreams...");
+    await RunProcessAndCaptureErrors(new ProcessStartInfo
+    {
+        FileName = "drush",
+        Arguments = $"-y --root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={hocrDirectory} --dsid=HOCR"
+    });
+}
+
+async Task PushOcrDatastreams(IdCrudOptions options)
+{
+    Console.WriteLine("Pushing OCR datastreams to Islandora...");
+    await RunProcessAndCaptureErrors(new ProcessStartInfo
+    {
+        FileName = "drush",
+        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudpd --datastreams_source_directory={ocrDirectory}"
+    });
+}
+
+// void TestOcr(TestOcrOptions options)
+// {
+//     hocrDirectory = options.HocrDirectory;
+//     ocrDirectory = options.OcrDirectory;
+//     GenerateOcrFiles();
+// }
+
 // async Task TestWithJpgs(TestUploadOptions options)
 // {
-//     var jpgDirectory = new DirectoryInfo(options.JpgDirectory);
-//     await SendImagesToTranskribus(jpgDirectory, options.HtrId, options.Overwrite);
+//     jpgDirectory = options.JpgDirectory;
+//     await SendImagesToTranskribus(options.HtrId, options.Overwrite);
 // }
 
 // async Task TestDownload(TestDownloadOptions options)
 // {
-//     var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
-//     var altoDirectory = new DirectoryInfo(options.AltoDirectory);
-//     await GetTranskribusAltoXml(altoDirectory);
-//     await ConvertAltoToHocr(altoDirectory, hocrDirectory);
+//     hocrDirectory = options.HocrDirectory;
+//     altoDirectory = options.AltoDirectory;
+//     await GetTranskribusAltoXml();
+//     await ConvertAltoToHocr();
 //     await database.SaveChangesAsync();
 // }
 
 // async Task TestXslt(TestXsltOptions options)
 // {
-//     var hocrDirectory = new DirectoryInfo(options.HocrDirectory);
-//     var altoDirectory = new DirectoryInfo(options.AltoDirectory);
-//     foreach (var altoXml in altoDirectory.EnumerateFiles())
+//     hocrDirectory = options.HocrDirectory;
+//     altoDirectory = options.AltoDirectory;
+//     foreach (var altoXml in Directory.EnumerateFiles(altoDirectory))
 //     {
-//         var hocrFileName = Path.Join(hocrDirectory.FullName, altoXml.Name.Replace("_ALTO.xml", "_HOCR.shtml"));
+//         var hocrFileName = Path.Join(hocrDirectory, Path.GetFileName(altoXml).Replace("_ALTO.xml", "_HOCR.shtml"));
 //         await RunProcessAndCaptureErrors(new ProcessStartInfo
 //         {
 //             FileName = "xslt3",
-//             Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoXml.FullName} -o:{hocrFileName}"
+//             Arguments = $"-xsl:{config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoXml} -o:{hocrFileName}"
 //         });
 //     }
-//     FixHocrFiles(hocrDirectory);
+//     FixHocrFiles();
 // }

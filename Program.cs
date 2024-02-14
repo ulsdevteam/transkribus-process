@@ -69,16 +69,16 @@ async Task CheckProgress(IdCrudOptions options)
         await GetTranskribusAltoXml();
         if (!database.ChangeTracker.HasChanges()) { return; }
         await ConvertAltoToHocr();
-        FixHocrFiles();
+        ProcessHocrXml(new OcrGenerator(ocrDirectory), new HocrHeaderFixer());
         await PushHocrDatastreams(options);
         await database.SaveChangesAsync();
-        GenerateOcrFiles();
         await PushOcrDatastreams(options);
     }
     finally
     {
         DeleteDirectoryIfExists(altoDirectory);
         DeleteDirectoryIfExists(hocrDirectory);
+        DeleteDirectoryIfExists(ocrDirectory);
     }
 }
 
@@ -89,7 +89,7 @@ async Task CreateOcrDatastreamsFromHocr(OcrOptions options)
     {
         pidFilePath = options.PidFile is null ? await GetPagePids(options, options.Pid) : Path.GetFullPath(options.PidFile);
         await GetHocrDatastreams(options, pidFilePath);
-        GenerateOcrFiles();
+        ProcessHocrXml(new OcrGenerator(ocrDirectory));
         await PushOcrDatastreams(options);
     }
     finally
@@ -239,49 +239,20 @@ async Task ConvertAltoToHocr()
     }
 }
 
-void FixHocrFiles()
+// the purpose of this function is to avoid calling XDocument.Load on the same file multiple times
+void ProcessHocrXml(params IHocrXmlProcessor[] processors)
 {
-    Console.WriteLine("Fixing hOCR file headers...");
-    foreach (var hocrFile in Directory.EnumerateFiles(hocrDirectory))
+    foreach (var processor in processors)
     {
-        var xml = XDocument.Load(hocrFile);
-        XNamespace ns = "http://www.w3.org/1999/xhtml";
-        var head = xml.Element(ns + "html").Element(ns + "head");
-        head.Element(ns + "title").Value = "Image: " + Regex.Replace(Path.GetFileName(hocrFile), "_HOCR.shtml$", "_JP2.jpg");
-        head.Add(new XElement(ns + "meta", new XAttribute("name", "ocr-system"), new XAttribute("content", "Transkribus")));
-        var writer = XmlWriter.Create(File.Open(hocrFile, FileMode.Truncate), new XmlWriterSettings 
-        {
-            // need to specify false here to stop it from emitting a byte order mark
-            Encoding = new UTF8Encoding(false), 
-            Indent = true
-        });
-        xml.Save(writer);
-        writer.Close();
+        processor.Init();
     }
-}
-
-void GenerateOcrFiles()
-{
-    Console.WriteLine("Generating OCR files from hOCR files...");
-    Directory.CreateDirectory(ocrDirectory);
     foreach (var hocrFile in Directory.EnumerateFiles(hocrDirectory))
     {
         var xml = XDocument.Load(hocrFile);
-        var text = new StringBuilder();
-        XNamespace ns = "http://www.w3.org/1999/xhtml";
-        foreach (var paragraph in xml.Descendants(ns + "p"))
+        foreach (var processor in processors)
         {
-            var lines = paragraph.Elements(ns + "span").Where(span => span.Attribute("class")?.Value == "ocr_line"); 
-            foreach (var line in lines) 
-            {
-                var words = line.Elements(ns + "span").Select(span => span.Value);
-                text.AppendJoin(' ', words);
-                text.AppendLine();
-            }
-            text.AppendLine();
+            processor.Process(hocrFile, xml);
         }
-        var ocrFile = Path.Join(ocrDirectory, Regex.Replace(Path.GetFileName(hocrFile), "_HOCR.shtml$", "_OCR.asc"));
-        File.WriteAllText(ocrFile, text.ToString().Trim());
     }
 }
 
@@ -313,6 +284,70 @@ async Task PushOcrDatastreams(IdCrudOptions options)
         FileName = "drush",
         Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudpd --datastreams_source_directory={ocrDirectory}"
     });
+}
+
+interface IHocrXmlProcessor
+{
+    void Init();
+    void Process(string hocrFile, XDocument hocrXml);
+}
+
+class HocrHeaderFixer : IHocrXmlProcessor
+{
+    public void Init()
+    {
+        Console.WriteLine("Fixing hOCR file headers...");
+    }
+
+    public void Process(string hocrFile, XDocument hocrXml)
+    {
+        XNamespace ns = "http://www.w3.org/1999/xhtml";
+        var head = hocrXml.Element(ns + "html").Element(ns + "head");
+        head.Element(ns + "title").Value = "Image: " + Regex.Replace(Path.GetFileName(hocrFile), "_HOCR.shtml$", "_JP2.jpg");
+        head.Add(new XElement(ns + "meta", new XAttribute("name", "ocr-system"), new XAttribute("content", "Transkribus")));
+        var writer = XmlWriter.Create(File.Open(hocrFile, FileMode.Truncate), new XmlWriterSettings 
+        {
+            // need to specify false here to stop it from emitting a byte order mark
+            Encoding = new UTF8Encoding(false), 
+            Indent = true
+        });
+        hocrXml.Save(writer);
+        writer.Close();
+    }
+}
+
+class OcrGenerator : IHocrXmlProcessor
+{
+    private string OcrDirectory {get;}
+    public OcrGenerator(string ocrDirectory)
+    {
+        OcrDirectory = ocrDirectory;
+    }
+
+    public void Init()
+    {
+        Console.WriteLine("Generating OCR files from hOCR files...");
+        Directory.CreateDirectory(OcrDirectory);
+    }
+
+    public void Process(string hocrFile, XDocument hocrXml)
+    {
+        var text = new StringBuilder();
+        XNamespace ns = "http://www.w3.org/1999/xhtml";
+        foreach (var paragraph in hocrXml.Descendants(ns + "p"))
+        {
+            var lines = paragraph.Elements(ns + "span").Where(span => span.Attribute("class")?.Value == "ocr_line"); 
+            foreach (var line in lines) 
+            {
+                var words = line.Elements(ns + "span").Select(span => span.Value);
+                text.AppendJoin(' ', words);
+                text.AppendLine();
+            }
+            text.AppendLine();
+        }
+        var ocrFile = Path.Join(OcrDirectory, Regex.Replace(Path.GetFileName(hocrFile), "_HOCR.shtml$", "_OCR.asc"));
+        File.WriteAllText(ocrFile, text.ToString().Trim());
+    }
 }
 
 // void TestOcr(TestOcrOptions options)

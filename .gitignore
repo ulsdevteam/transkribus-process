@@ -1,4 +1,5 @@
 /.vscode
+*.sln
 /bin
 /obj
 .env

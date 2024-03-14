@@ -13,7 +13,7 @@ DotEnv.Load();
 var config = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .Build();
-var database = new Database(config["DATABASE_PATH"]);
+var database = new Database(config);
 await database.Database.EnsureCreatedAsync();
 var transkribusClient = new TranskribusClient(config["TRANSKRIBUS_USERNAME"], config["TRANSKRIBUS_PASSWORD"]);
 // Define paths for temp folders, a uuid is included in case there are multiple instances running simultaneously

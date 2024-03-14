@@ -1,18 +1,27 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 class Database : DbContext
 {
     public DbSet<Page> Pages { get; set; }
-    public string DbPath { get; }
+    private IConfiguration Config { get; }
 
-    public Database(string dbPath)
+    public Database(IConfiguration config)
     {
-        DbPath = dbPath;
+        Config = config;
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
     {
-        options.UseSqlite($"Data Source={DbPath}");
+        var connectionString = Config["CONNECTION_STRING"];
+        if (connectionString.StartsWith("Filename=")) 
+        { 
+            options.UseSqlite(connectionString); 
+        }
+        else
+        {
+            options.UseMySQL(connectionString);
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder model)

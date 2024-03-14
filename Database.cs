@@ -28,4 +28,7 @@ class Page
     public int HtrId { get; set; }
     public int ProcessId { get; set;}
     public bool InProgress { get; set; }
+    public string User { get; set; }
+    public DateTime Uploaded { get; set; }
+    public DateTime? Downloaded { get; set; }
 }

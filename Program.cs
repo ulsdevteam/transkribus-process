@@ -6,6 +6,7 @@ using System.Xml;
 using System.Xml.Linq;
 using CommandLine;
 using dotenv.net;
+using Flurl.Http;
 using Microsoft.Extensions.Configuration;
 
 DotEnv.Load();
@@ -49,7 +50,7 @@ async Task UploadDocument(UploadOptions options)
         pidFilePath = options.PidFile is null ? await GetPagePids(options, options.Pid) : Path.GetFullPath(options.PidFile);
         await GetJp2Datastreams(options, pidFilePath);
         await ConvertJp2sToJpgs();
-        await SendImagesToTranskribus(options.HtrId, options.Overwrite);
+        await SendImagesToTranskribus(options.HtrId, options.User, options.Overwrite);
     }
     finally
     {
@@ -67,7 +68,11 @@ async Task CheckProgress(IdCrudOptions options)
     try
     {
         await GetTranskribusAltoXml();
-        if (!database.ChangeTracker.HasChanges()) { return; }
+        if (!Directory.EnumerateFiles(altoDirectory).Any()) 
+        {
+            await database.SaveChangesAsync();
+            return; 
+        }
         await ConvertAltoToHocr();
         ProcessHocrXml(new OcrGenerator(ocrDirectory), new HocrHeaderFixer());
         await PushHocrDatastreams(options);
@@ -176,21 +181,25 @@ async Task ConvertJp2sToJpgs()
     }
 }
 
-async Task SendImagesToTranskribus(int htrId, bool overwrite = false)
+async Task SendImagesToTranskribus(int htrId, string user, bool overwrite = false)
 {
     Console.WriteLine("Uploading images to Transkribus...");
     foreach (var file in Directory.EnumerateFiles(jpgDirectory))
     {
         var pid = Regex.Replace(Path.GetFileName(file), "_JP2.jpg$", "");
-        if (!overwrite && database.Pages.Where(p => p.Pid == pid).ToList() is List<Page> existingPages && existingPages.Any())
+        if (!overwrite)
         {
-            Console.Error.WriteLine(
-                $"Page {pid} has already been uploaded to Transkribus " +
-                string.Join(", ", existingPages.Select(existingPage =>
-                    (existingPage.HtrId == htrId ? "with the same model " : $"with another model ({existingPage.HtrId}) ") +
-                    (existingPage.InProgress ? "and is currently processing" : "and HOCR datastreams have already been pushed"))) + ".");
-            Console.Error.WriteLine("Run with the --overwrite flag to disregard this and re-upload them.");
-            continue;
+            var existingPages = database.Pages.Where(p => p.Pid == pid && (p.InProgress || p.Downloaded.HasValue)).ToList();
+            if (existingPages.Any())
+            {                
+                Console.Error.WriteLine(
+                    $"Page {pid} has already been uploaded to Transkribus " +
+                    string.Join(", ", existingPages.Select(existingPage =>
+                        (existingPage.HtrId == htrId ? "with the same model " : $"with another model ({existingPage.HtrId}) ") +
+                        (existingPage.InProgress ? "and is currently processing" : "and HOCR datastreams have already been pushed"))) + ".");
+                Console.Error.WriteLine("Run with the --overwrite flag to disregard this and re-upload them.");
+                continue;
+            }
         }
         var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file));
         var processId = await transkribusClient.Process(htrId, imageBase64);
@@ -199,7 +208,9 @@ async Task SendImagesToTranskribus(int htrId, bool overwrite = false)
             Pid = pid,
             HtrId = htrId,
             ProcessId = processId,
-            InProgress = true
+            InProgress = true,
+            User = user,
+            Uploaded = DateTime.Now
         });
         await database.SaveChangesAsync();
     }
@@ -211,15 +222,25 @@ async Task GetTranskribusAltoXml()
     Directory.CreateDirectory(altoDirectory);
     foreach (var page in database.Pages.Where(p => p.InProgress))
     {
-        var status = await transkribusClient.GetProcessStatus(page.ProcessId);
-        if (status != "FINISHED")
+        try
         {
+            var status = await transkribusClient.GetProcessStatus(page.ProcessId);
+            if (status != "FINISHED")
+            {
+                continue;
+            }
+        }
+        catch (FlurlHttpException e) when (e.StatusCode == 404)
+        {
+            Console.Error.WriteLine($"Transkribus process for page {page.Pid} has expired.");
+            page.InProgress = false;
             continue;
         }
         Console.WriteLine($"{page.Pid} is done processing, downloading...");
         var altoXml = await transkribusClient.GetAltoXml(page.ProcessId);
         var altoFile = Path.Join(altoDirectory, page.Pid + "_ALTO.xml");
         altoXml.Save(File.OpenWrite(altoFile));
+        page.Downloaded = DateTime.Now;
         page.InProgress = false;
     }    
 }

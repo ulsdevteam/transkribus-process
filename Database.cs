@@ -20,7 +20,7 @@ class Database : DbContext
         }
         else
         {
-            options.UseMySQL(connectionString);
+            options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
         }
     }
 

@@ -145,6 +145,11 @@ async Task RunProcessAndCaptureErrors(ProcessStartInfo startInfo)
     }
 }
 
+string CommonDrushOptions(IdCrudOptions options) => 
+    $"--root={options.Root ?? config["ISLANDORA_DRUPAL_ROOT"]} " +
+    $"--user={options.User ?? config["USER"]} " +
+    $"--uri={options.Uri ?? config["ISLANDORA_URI"]} ";
+
 async Task<string> GetPagePids(IdCrudOptions options, string pid)
 {
     var pidFilePath = Path.GetTempFileName();
@@ -152,7 +157,10 @@ async Task<string> GetPagePids(IdCrudOptions options, string pid)
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudfp --solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{pid.Replace(":", "\\:")}\" --pid_file={pidFilePath}"
+        Arguments = CommonDrushOptions(options) +
+                    "idcrudfp " +
+                    $"--solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{pid.Replace(":", "\\:")}\" " +
+                    $"--pid_file={pidFilePath}"
     });
     return pidFilePath;
 }
@@ -163,7 +171,11 @@ async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath)
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"-y --root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={jp2Directory} --dsid=JP2"
+        Arguments = CommonDrushOptions(options) +
+                    "idcrudfd -y " +
+                    $"--pid_file={pidFilePath} " +
+                    $"--datastreams_directory={jp2Directory} " +
+                    "--dsid=JP2"
     });
 }
 
@@ -283,7 +295,9 @@ async Task PushHocrDatastreams(IdCrudOptions options)
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudpd --datastreams_source_directory={hocrDirectory}"
+        Arguments = CommonDrushOptions(options) +
+                    "idcrudpd " +
+                    $"--datastreams_source_directory={hocrDirectory}"
     });
 }
 
@@ -293,7 +307,11 @@ async Task GetHocrDatastreams(IdCrudOptions options, string pidFilePath)
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"-y --root={options.Root} --user={options.User} --uri={options.Uri} idcrudfd --pid_file={pidFilePath} --datastreams_directory={hocrDirectory} --dsid=HOCR"
+        Arguments = CommonDrushOptions(options) +
+                    "idcrudfd -y " +
+                    $"--pid_file={pidFilePath} " +
+                    $"--datastreams_directory={hocrDirectory} " +
+                    "--dsid=HOCR"
     });
 }
 
@@ -303,7 +321,9 @@ async Task PushOcrDatastreams(IdCrudOptions options)
     await RunProcessAndCaptureErrors(new ProcessStartInfo
     {
         FileName = "drush",
-        Arguments = $"--root={options.Root} --user={options.User} --uri={options.Uri} idcrudpd --datastreams_source_directory={ocrDirectory}"
+        Arguments = CommonDrushOptions(options) + 
+                    "idcrudpd " +
+                    $"--datastreams_source_directory={ocrDirectory}"
     });
 }
 

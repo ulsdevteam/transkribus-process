@@ -50,6 +50,12 @@ class OcrOptions : IdCrudOptions
     public string PidFile { get; set; }
 }
 
+[Verb("msvc")]
+class MsvcOptions
+{
+
+}
+
 // [Verb("testocr")]
 // class TestOcrOptions
 // {

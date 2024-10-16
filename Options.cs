@@ -18,6 +18,19 @@ class ProcessOptions : UploadOptions
 
 }
 
+[Verb("page")]
+class ProcessPageOptions : IdCrudOptions
+{
+    [Option(Required = true)]
+    public string Pid { get; set; }    
+
+    [Option(Required = true)]
+    public int HtrId { get; set; }
+
+    [Option]
+    public bool Overwrite { get; set; }
+}
+
 [Verb("upload")]
 class UploadOptions : IdCrudOptions
 {
@@ -27,7 +40,7 @@ class UploadOptions : IdCrudOptions
     [Option(SetName = "pidfile")]
     public string PidFile { get; set; }
 
-    [Option]
+    [Option(Required = true)]
     public int HtrId { get; set; }
 
     [Option]

@@ -44,6 +44,18 @@ class Processor
         }
     }
 
+    public async Task<string> ProcessSinglePage(ProcessPageOptions options)
+    {
+        var pidFilePath = Path.GetTempFileName();
+        File.WriteAllText(pidFilePath, options.Pid);
+        await GetJp2Datastreams(options, pidFilePath);
+        await ConvertJp2sToJpgs();
+        await SendImagesToTranskribus(options.HtrId, options.User, options.Overwrite);
+        var page = Database.GetMostRecentByPid(options.Pid);
+        await GetSinglePageTranskribusAltoXml(page);
+        return Directory.EnumerateFiles(HocrDirectory).Single();
+    }
+
     public async Task UploadDocument(UploadOptions options)
     {
         string pidFilePath = null;
@@ -69,7 +81,7 @@ class Processor
     {
         try
         {
-            await GetTranskribusAltoXml();
+            await GetAllFinishedTranskribusAltoXml();
             if (!Directory.EnumerateFiles(AltoDirectory).Any())
             {
                 await Database.SaveChangesAsync();
@@ -87,6 +99,13 @@ class Processor
             DeleteDirectoryIfExists(HocrDirectory);
             DeleteDirectoryIfExists(OcrDirectory);
         }
+    }
+
+    public async Task CheckSinglePage(Page page)
+    {
+        await GetSinglePageTranskribusAltoXml(page);
+        await ConvertAltoToHocr();
+        ProcessHocrXml(new OcrGenerator(OcrDirectory), new HocrHeaderFixer());
     }
 
     public async Task CreateOcrDatastreamsFromHocr(OcrOptions options)
@@ -232,7 +251,7 @@ class Processor
         }
     }
 
-    async Task GetTranskribusAltoXml()
+    async Task GetAllFinishedTranskribusAltoXml()
     {
         Console.WriteLine("Checking for finished pages...");
         Directory.CreateDirectory(AltoDirectory);
@@ -259,6 +278,20 @@ class Processor
             page.Downloaded = DateTime.Now;
             page.InProgress = false;
         }
+    }
+
+    async Task GetSinglePageTranskribusAltoXml(Page page)
+    {
+        while (await TranskribusClient.GetProcessStatus(page.ProcessId) != "FINISHED")
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        }
+        var altoXml = await TranskribusClient.GetAltoXml(page.ProcessId);
+        var altoFile = Path.Join(AltoDirectory, page.Pid + "_ALTO.xml");
+        altoXml.Save(File.OpenWrite(altoFile));
+        page.Downloaded = DateTime.Now;
+        page.InProgress = false;
+        await Database.SaveChangesAsync();
     }
 
     async Task ConvertAltoToHocr()

@@ -18,8 +18,12 @@ static class Microservice {
         var app = builder.Build();
         app.UseHttpsRedirection();
         app.MapGet("/", ([FromHeader(Name = "X-Islandora-Args")] string args, Processor processor) => {
-            Parser.Default.ParseArguments<ProcessOptions>(args.SplitArgs())
-                .MapResult(options => processor.ProcessDocument(options), error => Task.CompletedTask);
+            Parser.Default.ParseArguments<ProcessPageOptions>(args.SplitArgs())
+                .MapResult(async options => 
+                {
+                    var file = await processor.ProcessSinglePage(options);
+                    return Results.File(file, "application/xml");
+                }, error => Task.FromResult(Results.BadRequest(error)));
         });
         Console.WriteLine("Running microservice");
         app.Run();

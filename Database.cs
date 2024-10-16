@@ -29,6 +29,11 @@ class Database : DbContext
         model.Entity<Page>().HasKey(p => p.ProcessId);
         model.Entity<Page>().HasIndex(p => p.InProgress);
     }
+
+    public Page GetMostRecentByPid(string pid)
+    {
+        return Pages.OrderByDescending(p => p.Uploaded).FirstOrDefault(p => p.Pid == pid);
+    }
 }
 
 class Page

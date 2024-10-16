@@ -44,16 +44,28 @@ class Processor
         }
     }
 
-    public async Task<string> ProcessSinglePage(ProcessPageOptions options)
+    public async Task<byte[]> ProcessSinglePage(ProcessPageOptions options)
     {
         var pidFilePath = Path.GetTempFileName();
-        File.WriteAllText(pidFilePath, options.Pid);
-        await GetJp2Datastreams(options, pidFilePath);
-        await ConvertJp2sToJpgs();
-        await SendImagesToTranskribus(options.HtrId, options.User, options.Overwrite);
-        var page = Database.GetMostRecentByPid(options.Pid);
-        await GetSinglePageTranskribusAltoXml(page);
-        return Directory.EnumerateFiles(HocrDirectory).Single();
+        try
+        {
+            await File.WriteAllTextAsync(pidFilePath, options.Pid);
+            await GetJp2Datastreams(options, pidFilePath);
+            await ConvertJp2sToJpgs();
+            await SendImagesToTranskribus(options.HtrId, options.User, options.Overwrite);
+            var page = Database.GetMostRecentByPid(options.Pid);
+            await GetSinglePageTranskribusAltoXml(page);
+            var hocrFile = Directory.EnumerateFiles(HocrDirectory).Single();
+            return await File.ReadAllBytesAsync(hocrFile);
+        }
+        finally
+        {
+            File.Delete(pidFilePath);
+            DeleteDirectoryIfExists(Jp2Directory);
+            DeleteDirectoryIfExists(JpgDirectory);
+            DeleteDirectoryIfExists(AltoDirectory);
+            DeleteDirectoryIfExists(HocrDirectory);
+        }
     }
 
     public async Task UploadDocument(UploadOptions options)

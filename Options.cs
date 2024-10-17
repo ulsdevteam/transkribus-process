@@ -66,7 +66,8 @@ class OcrOptions : IdCrudOptions
 [Verb("msvc")]
 class MsvcOptions
 {
-
+    [Option('a', "asp-net-args")]
+    public string AspNetArgs { get; set; }
 }
 
 // [Verb("testocr")]

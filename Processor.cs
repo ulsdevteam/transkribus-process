@@ -117,7 +117,7 @@ class Processor
     {
         await GetSinglePageTranskribusAltoXml(page);
         await ConvertAltoToHocr();
-        ProcessHocrXml(new OcrGenerator(OcrDirectory), new HocrHeaderFixer());
+        ProcessHocrXml(new HocrHeaderFixer());
     }
 
     public async Task CreateOcrDatastreamsFromHocr(OcrOptions options)

@@ -44,13 +44,15 @@ class Processor
         }
     }
 
-    public async Task<byte[]> ProcessSinglePage(ProcessPageOptions options)
+    public async Task<byte[]> ProcessSinglePage(Uri fileUri, ProcessPageOptions options)
     {
-        var pidFilePath = Path.GetTempFileName();
+        // var pidFilePath = Path.GetTempFileName();
         try
         {
-            await File.WriteAllTextAsync(pidFilePath, options.Pid);
-            await GetJp2Datastreams(options, pidFilePath);
+            // await File.WriteAllTextAsync(pidFilePath, options.Pid);
+            // await GetJp2Datastreams(options, pidFilePath);
+            var sourceFile = await fileUri.GetBytesAsync();
+            await File.WriteAllBytesAsync(Path.Join(Jp2Directory, Path.GetFileName(fileUri.LocalPath)), sourceFile);
             await ConvertJp2sToJpgs();
             await SendImagesToTranskribus(options.HtrId, options.User, options.Overwrite);
             var page = Database.GetMostRecentByPid(options.Pid);
@@ -60,7 +62,7 @@ class Processor
         }
         finally
         {
-            File.Delete(pidFilePath);
+            // File.Delete(pidFilePath);
             DeleteDirectoryIfExists(Jp2Directory);
             DeleteDirectoryIfExists(JpgDirectory);
             DeleteDirectoryIfExists(AltoDirectory);

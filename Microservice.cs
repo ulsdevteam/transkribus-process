@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using CommandLine;
 
-static class Microservice {
+static class Microservice
+{
 
     public static void Run(IConfiguration configuration, Database database, TranskribusClient transkribusClient, MsvcOptions options)
     {
@@ -13,11 +14,16 @@ static class Microservice {
         builder.Services.AddScoped<Processor>();
         var app = builder.Build();
         app.UseHttpsRedirection();
-        app.MapGet("/", ([FromHeader(Name = "X-Islandora-Args")] string args, Processor processor) => {
+        app.MapGet("/", (
+            [FromHeader(Name = "X-Islandora-Args")] string args,
+            [FromHeader(Name = "Apix-Ldp-Resource")] string fileUri,
+            Processor processor
+        ) =>
+        {
             Parser.Default.ParseArguments<ProcessPageOptions>(args.SplitArgs())
-                .MapResult(async options => 
+                .MapResult(async options =>
                 {
-                    var file = await processor.ProcessSinglePage(options);
+                    var file = await processor.ProcessSinglePage(new Uri(fileUri), options);
                     return Results.File(file, "application/xml");
                 }, error => Task.FromResult(Results.BadRequest(error)));
         });

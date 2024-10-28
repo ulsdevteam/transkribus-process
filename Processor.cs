@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Flurl.Http;
-using Microsoft.Extensions.Configuration;
 
 class Processor
 {
@@ -32,7 +31,6 @@ class Processor
     }
 
     string TempDirPath(string label) => Path.Join(Path.GetTempPath(), $"transkribus_process_{label}_{Uuid:N}");
-
 
     public async Task ProcessDocument(ProcessOptions options)
     {
@@ -195,6 +193,13 @@ class Processor
         $"--user={options.User ?? Config["USER"]} " +
         $"--uri={options.Uri ?? Config["ISLANDORA_URI"]} ";
 
+    /// <summary>
+    /// Given the pid of an item, gets its pages and writes their pids to a temporary file.
+    /// Uses IDCRUD Fetch Pids with a Solr search on RELS_EXT_isMemberOf_uri_ms
+    /// </summary>
+    /// <param name="options">Options to pass to Drush</param>
+    /// <param name="pid">The item pid</param>
+    /// <returns>Path to temporary file containing page pids</returns>
     async Task<string> GetPagePids(IdCrudOptions options, string pid)
     {
         var pidFilePath = Path.GetTempFileName();
@@ -210,6 +215,12 @@ class Processor
         return pidFilePath;
     }
 
+    /// <summary>
+    /// Downloads JP2 Datastreams into the Jp2Directory.
+    /// Uses IDCRUD Fetch Datastreams
+    /// </summary>
+    /// <param name="options">Options to pass to Drush</param>
+    /// <param name="pidFilePath">Path to page pid file</param>
     async Task GetJp2Datastreams(IdCrudOptions options, string pidFilePath)
     {
         Console.WriteLine("Fetching jp2 datastreams...");
@@ -224,6 +235,9 @@ class Processor
         });
     }
 
+    /// <summary>
+    /// Creates JpgDirectory and runs convert on each file in Jp2Directory.
+    /// </summary>
     async Task ConvertJp2sToJpgs()
     {
         Console.WriteLine("Converting jp2s to jpgs...");
@@ -238,6 +252,13 @@ class Processor
         }
     }
 
+    /// <summary>
+    /// For every file in the JpgDirectory, upload it as base64 to the Transkribus API and save the process ID we get back in the DB.
+    /// Associates the process ID with the pid by getting the pid from the JPG's filename
+    /// </summary>
+    /// <param name="htrId">Transkribus Handwriting Text Recognition Model ID</param>
+    /// <param name="user">The current user</param>
+    /// <param name="overwrite">When false, will check if a page with that pid has already been processed and will skip that page if so.</param>
     async Task SendImagesToTranskribus(int htrId, string user, bool overwrite = false)
     {
         Console.WriteLine("Uploading images to Transkribus...");
@@ -273,6 +294,12 @@ class Processor
         }
     }
 
+    /// <summary>
+    /// Uploads a single file in the JpgDirectory as base64 to the Transkribus API and saves the Process ID.
+    /// Does not associate the Process ID with a Pid.
+    /// </summary>
+    /// <param name="htrId">Transkribus Handwriting Text Recognition Model ID</param>
+    /// <returns>The Page object containing the Process ID</returns>
     async Task<Page> SendSinglePageToTranskribus(int htrId)
     {
         var file = Directory.EnumerateFiles(JpgDirectory).Single();
@@ -290,6 +317,10 @@ class Processor
         return page;
     }
 
+    /// <summary>
+    /// Checks all Pages marked In Progress for completion, and downloads their ALTO XML to the AltoDirectory if they are.
+    /// If a call to the Transkribus API returns a 404, that Page is marked as no longer being In Progress.
+    /// </summary>
     async Task GetAllFinishedTranskribusAltoXml()
     {
         Console.WriteLine("Checking for finished pages...");
@@ -319,6 +350,10 @@ class Processor
         }
     }
 
+    /// <summary>
+    /// Checks for the completion of one page in a loop, and when complete downloads its ALTO XML to the AltoDirectory.
+    /// </summary>
+    /// <param name="page">The Page object</param>
     async Task GetSinglePageTranskribusAltoXml(Page page)
     {
         while (await TranskribusClient.GetProcessStatus(page.ProcessId) != "FINISHED")
@@ -334,6 +369,9 @@ class Processor
         await Database.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Creates the HocrDirectory and uses xlst3 to transform each file in the AltoDirectory into HOCR.
+    /// </summary>
     async Task ConvertAltoToHocr()
     {
         Console.WriteLine("Converting ALTO XML to hOCR...");
@@ -349,7 +387,11 @@ class Processor
         }
     }
 
-    // the purpose of this function is to avoid calling XDocument.Load on the same file multiple times
+    /// <summary>
+    /// Given a set of IHocrXmlProcessors, runs them each on every file in the HocrDirectory.
+    /// The purpose of this function is to avoid calling XDocument.Load on the same file multiple times
+    /// </summary>
+    /// <param name="processors">The HOCR XML Processors</param>
     void ProcessHocrXml(params IHocrXmlProcessor[] processors)
     {
         foreach (var processor in processors)

@@ -44,25 +44,23 @@ class Processor
         }
     }
 
-    public async Task<byte[]> ProcessSinglePage(Uri fileUri, ProcessPageOptions options)
+    public async Task<byte[]> ProcessSinglePage(Uri fileUri, MicroservicePageOptions options)
     {
-        // var pidFilePath = Path.GetTempFileName();
         try
         {
-            // await File.WriteAllTextAsync(pidFilePath, options.Pid);
-            // await GetJp2Datastreams(options, pidFilePath);
             var sourceFile = await fileUri.GetBytesAsync();
+            Directory.CreateDirectory(Jp2Directory);
             await File.WriteAllBytesAsync(Path.Join(Jp2Directory, Path.GetFileName(fileUri.LocalPath)), sourceFile);
             await ConvertJp2sToJpgs();
-            await SendImagesToTranskribus(options.HtrId, options.User, options.Overwrite);
-            var page = Database.GetMostRecentByPid(options.Pid);
+            var page = await SendSinglePageToTranskribus(options.HtrId);            
             await GetSinglePageTranskribusAltoXml(page);
+            await ConvertAltoToHocr();
+            ProcessHocrXml(new HocrHeaderFixer());
             var hocrFile = Directory.EnumerateFiles(HocrDirectory).Single();
             return await File.ReadAllBytesAsync(hocrFile);
         }
         finally
         {
-            // File.Delete(pidFilePath);
             DeleteDirectoryIfExists(Jp2Directory);
             DeleteDirectoryIfExists(JpgDirectory);
             DeleteDirectoryIfExists(AltoDirectory);
@@ -114,14 +112,7 @@ class Processor
             DeleteDirectoryIfExists(OcrDirectory);
         }
     }
-
-    public async Task CheckSinglePage(Page page)
-    {
-        await GetSinglePageTranskribusAltoXml(page);
-        await ConvertAltoToHocr();
-        ProcessHocrXml(new HocrHeaderFixer());
-    }
-
+    
     public async Task CreateOcrDatastreamsFromHocr(OcrOptions options)
     {
         string pidFilePath = null;
@@ -140,6 +131,23 @@ class Processor
             {
                 File.Delete(pidFilePath);
             }
+            DeleteDirectoryIfExists(HocrDirectory);
+            DeleteDirectoryIfExists(OcrDirectory);
+        }
+    }
+
+    public async Task<byte[]> CreateSinglePageOcr(Uri fileUri, MicroserviceOcrOptions options)
+    {
+        try
+        {
+            var hocrFile = await fileUri.GetBytesAsync();
+            Directory.CreateDirectory(HocrDirectory);
+            await File.WriteAllBytesAsync(Path.Join(HocrDirectory, fileUri.LocalPath), hocrFile);
+            ProcessHocrXml(new OcrGenerator(OcrDirectory));
+            return await File.ReadAllBytesAsync(Directory.EnumerateFiles(OcrDirectory).Single());
+        }
+        finally
+        {
             DeleteDirectoryIfExists(HocrDirectory);
             DeleteDirectoryIfExists(OcrDirectory);
         }
@@ -265,6 +273,23 @@ class Processor
         }
     }
 
+    async Task<Page> SendSinglePageToTranskribus(int htrId)
+    {
+        var file = Directory.EnumerateFiles(JpgDirectory).Single();
+        var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file));
+        var processId = await TranskribusClient.Process(htrId, imageBase64);
+        var page = new Page
+        {
+            HtrId = htrId,
+            ProcessId = processId,
+            InProgress = true,
+            Uploaded = DateTime.Now
+        };
+        Database.Pages.Add(page);
+        await Database.SaveChangesAsync();
+        return page;
+    }
+
     async Task GetAllFinishedTranskribusAltoXml()
     {
         Console.WriteLine("Checking for finished pages...");
@@ -301,6 +326,7 @@ class Processor
             await Task.Delay(TimeSpan.FromSeconds(5));
         }
         var altoXml = await TranskribusClient.GetAltoXml(page.ProcessId);
+        Directory.CreateDirectory(AltoDirectory);
         var altoFile = Path.Join(AltoDirectory, page.Pid + "_ALTO.xml");
         altoXml.Save(File.OpenWrite(altoFile));
         page.Downloaded = DateTime.Now;
@@ -377,5 +403,4 @@ class Processor
                         $"--datastreams_source_directory={OcrDirectory}"
         });
     }
-
 }

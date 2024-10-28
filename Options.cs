@@ -19,16 +19,16 @@ class ProcessOptions : UploadOptions
 }
 
 [Verb("page")]
-class ProcessPageOptions : IdCrudOptions
+class MicroservicePageOptions
 {
     [Option(Required = true)]
-    public string Pid { get; set; }    
-
-    [Option(Required = true)]
     public int HtrId { get; set; }
+}
 
-    [Option]
-    public bool Overwrite { get; set; }
+[Verb("ocr")]
+class MicroserviceOcrOptions
+{
+
 }
 
 [Verb("upload")]

@@ -13,22 +13,28 @@ static class Microservice
         builder.Services.AddSingleton(transkribusClient);
         builder.Services.AddScoped<Processor>();
         var app = builder.Build();
-        app.UseHttpsRedirection();
         app.MapGet("/", (
             [FromHeader(Name = "X-Islandora-Args")] string args,
             [FromHeader(Name = "Apix-Ldp-Resource")] string fileUri,
             Processor processor
         ) =>
         {
-            Parser.Default.ParseArguments<ProcessPageOptions>(args.SplitArgs())
-                .MapResult(async options =>
+            var parseResult = Parser.Default.ParseArguments<MicroservicePageOptions, MicroserviceOcrOptions>(args.SplitArgs());
+            return parseResult.MapResult(
+                async (MicroservicePageOptions options) =>
                 {
                     var file = await processor.ProcessSinglePage(new Uri(fileUri), options);
                     return Results.File(file, "application/xml");
-                }, error => Task.FromResult(Results.BadRequest(error)));
+                },
+                async (MicroserviceOcrOptions options) =>
+                {
+                    var file = await processor.CreateSinglePageOcr(new Uri(fileUri), options);
+                    return Results.File(file, "text/plain");
+                },
+                error => Task.FromResult(Results.BadRequest())
+            );
         });
         Console.WriteLine("Running microservice");
         app.Run();
     }
-
 }

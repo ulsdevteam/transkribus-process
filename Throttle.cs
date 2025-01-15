@@ -1,19 +1,22 @@
+using System.Threading.RateLimiting;
+
 class Throttle
 {
-    private TimeSpan Interval { get; set; }
-    private Task TimerTask { get; set; }
+    private RateLimiter RateLimiter { get; set; }
 
     public Throttle(TimeSpan interval)
     {
-        Interval = interval;
-        TimerTask = Task.CompletedTask;
+        RateLimiter = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions{
+            ReplenishmentPeriod = interval,
+            TokensPerPeriod = 1,
+            AutoReplenishment = true,
+            TokenLimit = 1
+        });
     }
 
     public async Task<T> RunThrottled<T>(Func<Task<T>> taskFunc)
     {
-        await TimerTask;
-        var result = await taskFunc();
-        TimerTask = Task.Run(() => Task.Delay(Interval));
-        return result;
+        using var rateLimitLease = await RateLimiter.AcquireAsync(0);
+        return await taskFunc();
     }
 }

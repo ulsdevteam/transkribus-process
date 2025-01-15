@@ -18,6 +18,19 @@ class ProcessOptions : UploadOptions
 
 }
 
+[Verb("page")]
+class MicroservicePageOptions
+{
+    [Option(Required = true)]
+    public int HtrId { get; set; }
+}
+
+[Verb("ocr")]
+class MicroserviceOcrOptions
+{
+
+}
+
 [Verb("upload")]
 class UploadOptions : IdCrudOptions
 {
@@ -27,7 +40,7 @@ class UploadOptions : IdCrudOptions
     [Option(SetName = "pidfile")]
     public string PidFile { get; set; }
 
-    [Option]
+    [Option(Required = true)]
     public int HtrId { get; set; }
 
     [Option]
@@ -48,6 +61,13 @@ class OcrOptions : IdCrudOptions
 
     [Option(SetName = "pidfile")]
     public string PidFile { get; set; }
+}
+
+[Verb("msvc")]
+class MsvcOptions
+{
+    [Option('a', "asp-net-args")]
+    public string AspNetArgs { get; set; }
 }
 
 // [Verb("testocr")]

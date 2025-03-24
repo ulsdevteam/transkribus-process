@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 DotEnv.Load();
 var config = new ConfigurationBuilder()
     .AddEnvironmentVariables()
+    .AddKeyPerFile("/run/secrets", optional: true)
     .Build();
 var database = new Database(config);
 await database.Database.EnsureCreatedAsync();

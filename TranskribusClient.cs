@@ -1,7 +1,9 @@
 using System.Xml.Linq;
 using Flurl.Http;
+using Flurl.Http.Configuration;
 using Flurl.Http.Xml;
 using Newtonsoft.Json;
+using System.Text.Json;
 
 class TranskribusClient
 {
@@ -19,7 +21,7 @@ class TranskribusClient
     {
         Username = username;
         Password = password;
-        Client = new FlurlClient(ApiUri).BeforeCall(call => Authorize(call.Request));
+        Client = new FlurlClient(ApiUri).BeforeCall(call => Authorize(call.Request));           
     }
 
     private async Task Authorize(IFlurlRequest request)
@@ -48,17 +50,39 @@ class TranskribusClient
         request.WithHeader("Authorization", "Bearer " + AuthResponse.AccessToken);
     }
 
-    public async Task<int> Process(int htrId, string imageBase64)
+    public Task<int> Process(int htrId, string imageBase64) 
+    {
+        var options = new MicroservicePageOptions 
+        {
+            HtrId = htrId
+        };
+        return Process(options, imageBase64);
+    }
+
+    public async Task<int> Process(MicroservicePageOptions options, string imageBase64)
     {
         return await Throttle.RunThrottled(async () =>
         {
-            var response = await Client.Request().PostJsonAsync(new
+            var request = Client.Request();
+            // request.Settings.JsonSerializer = new DefaultJsonSerializer(new JsonSerializerOptions 
+            // {
+            //     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            // });
+            var response = await request.PostJsonAsync(new
             {
                 config = new
                 {
                     textRecognition = new
                     {
-                        htrId
+                        htrId = options.HtrId
+                    },
+                    lineDetection = new 
+                    {
+                        modelId = options.LineDetectionModelId,
+                        minimalBaselineLength = options.MinimalBaselineLength,
+                        baselineAccuracyThreshold = options.BaselineAccuracyThreshold,
+                        maxDistForMerging = options.MaxDistForMerging,
+                        numTextRegions = options.NumTextRegions
                     }
                 },
                 image = new

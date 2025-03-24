@@ -24,7 +24,11 @@ static class Microservice
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(jwtOptions => 
             {
                 var rsa = RSA.Create();
-                rsa.ImportRSAPublicKey(Convert.FromBase64String(configuration["JWT_PUBLIC_KEY"]), out var _);
+                var pubkey = configuration["JWT_PUBLIC_KEY"]
+                    .Replace("-----BEGIN PUBLIC KEY-----", "")
+                    .Replace("-----END PUBLIC KEY-----", "");
+                Console.WriteLine(pubkey);
+                rsa.ImportRSAPublicKey(Convert.FromBase64String(pubkey), out var _);
                 jwtOptions.TokenValidationParameters = new TokenValidationParameters 
                 {
                     IssuerSigningKey = new RsaSecurityKey(rsa),
@@ -38,20 +42,29 @@ static class Microservice
         app.MapGet("/", (
             [FromHeader(Name = "X-Islandora-Args")] string args,
             [FromHeader(Name = "Apix-Ldp-Resource")] string fileUri,
+            [FromHeader(Name = "Accept")] string mimeType,
             Processor processor
         ) =>
         {
-            var parseResult = Parser.Default.ParseArguments<MicroservicePageOptions, MicroserviceOcrOptions>(args.SplitArgs());
+            var parseResult = Parser.Default.ParseArguments<MicroservicePageOptions, MicroserviceOcrOptions, MicroserviceTestOptions>(args.SplitArgs());
             return parseResult.MapResult(
                 async (MicroservicePageOptions options) =>
                 {
+                    Console.WriteLine($"Request Args: {args}");
+                    Console.WriteLine($"Request File Uri: {fileUri}");
+                    Console.WriteLine($"Request Mime Type: {mimeType}");
                     var file = await processor.ProcessSinglePage(new Uri(fileUri), options);
-                    return Results.File(file, "application/xml");
+                    return Results.File(file, mimeType);
                 },
                 async (MicroserviceOcrOptions options) =>
                 {
                     var file = await processor.CreateSinglePageOcr(new Uri(fileUri), options);
-                    return Results.File(file, "text/plain");
+                    return Results.File(file, mimeType);
+                },
+                async (MicroserviceTestOptions options) => {
+                    Console.WriteLine($"Request Args: {args}");
+                    Console.WriteLine($"Request File Uri: {fileUri}");
+                    return Results.NoContent();
                 },
                 error => Task.FromResult(Results.BadRequest())
             );

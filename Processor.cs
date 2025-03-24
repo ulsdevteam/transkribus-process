@@ -50,7 +50,7 @@ class Processor
             Directory.CreateDirectory(Jp2Directory);
             await File.WriteAllBytesAsync(Path.Join(Jp2Directory, Path.GetFileName(fileUri.LocalPath)), sourceFile);
             await ConvertJp2sToJpgs();
-            var page = await SendSinglePageToTranskribus(options.HtrId);            
+            var page = await SendSinglePageToTranskribus(options);            
             await GetSinglePageTranskribusAltoXml(page);
             await ConvertAltoToHocr();
             ProcessHocrXml(new HocrHeaderFixer());
@@ -300,14 +300,14 @@ class Processor
     /// </summary>
     /// <param name="htrId">Transkribus Handwriting Text Recognition Model ID</param>
     /// <returns>The Page object containing the Process ID</returns>
-    async Task<Page> SendSinglePageToTranskribus(int htrId)
+    async Task<Page> SendSinglePageToTranskribus(MicroservicePageOptions options)
     {
         var file = Directory.EnumerateFiles(JpgDirectory).Single();
         var imageBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(file));
-        var processId = await TranskribusClient.Process(htrId, imageBase64);
+        var processId = await TranskribusClient.Process(options, imageBase64);
         var page = new Page
         {
-            HtrId = htrId,
+            HtrId = options.HtrId,
             ProcessId = processId,
             InProgress = true,
             Uploaded = DateTime.Now

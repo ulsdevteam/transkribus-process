@@ -23,12 +23,11 @@ static class Microservice
             }
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(jwtOptions => 
             {
-                var rsa = RSA.Create();
                 var pubkey = configuration["JWT_PUBLIC_KEY"]
                     .Replace("-----BEGIN PUBLIC KEY-----", "")
                     .Replace("-----END PUBLIC KEY-----", "");
-                Console.WriteLine(pubkey);
-                rsa.ImportRSAPublicKey(Convert.FromBase64String(pubkey), out var _);
+                var rsa = RSA.Create();
+                rsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(pubkey), out var _);
                 jwtOptions.TokenValidationParameters = new TokenValidationParameters 
                 {
                     IssuerSigningKey = new RsaSecurityKey(rsa),

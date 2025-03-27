@@ -246,7 +246,7 @@ class Processor
         {
             await RunProcessAndCaptureErrors(new ProcessStartInfo
             {
-                FileName = "convert",
+                FileName = "magick",
                 Arguments = $"{jp2file} {Path.Join(JpgDirectory, Path.GetFileNameWithoutExtension(jp2file) + ".jpg")}"
             });
         }

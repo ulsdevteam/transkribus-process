@@ -16,7 +16,8 @@ class HocrHeaderFixer : IHocrXmlProcessor
         var head = hocrXml.Element(ns + "html").Element(ns + "head");
         head.Element(ns + "title").Value = "Image: " + Regex.Replace(Path.GetFileName(hocrFile), "_HOCR.shtml$", "_JP2.jpg");
         head.Add(new XElement(ns + "meta", new XAttribute("name", "ocr-system"), new XAttribute("content", "Transkribus")));
-        var writer = XmlWriter.Create(File.Open(hocrFile, FileMode.Truncate), new XmlWriterSettings 
+        using var fileStream = File.Open(hocrFile, FileMode.Truncate);
+        var writer = XmlWriter.Create(fileStream, new XmlWriterSettings 
         {
             // need to specify false here to stop it from emitting a byte order mark
             Encoding = new UTF8Encoding(false), 

@@ -53,7 +53,7 @@ class Processor
             var page = await SendSinglePageToTranskribus(options);            
             await GetSinglePageTranskribusAltoXml(page);
             await ConvertAltoToHocr();
-            ProcessHocrXml(new HocrHeaderFixer());
+            ProcessHocrXml(new HocrHeaderFixer(options.HtrId, Path.GetFileName(fileUri.LocalPath)));
             var hocrFile = Directory.EnumerateFiles(HocrDirectory).Single();
             return await File.ReadAllBytesAsync(hocrFile);
         }

@@ -46,12 +46,6 @@ class MicroserviceOcrOptions
 
 }
 
-[Verb("test")]
-class MicroserviceTestOptions
-{
-
-}
-
 [Verb("upload")]
 class UploadOptions : IdCrudOptions
 {

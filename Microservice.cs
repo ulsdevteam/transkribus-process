@@ -45,13 +45,10 @@ static class Microservice
             Processor processor
         ) =>
         {
-            var parseResult = Parser.Default.ParseArguments<MicroservicePageOptions, MicroserviceOcrOptions, MicroserviceTestOptions>(args.SplitArgs());
+            var parseResult = Parser.Default.ParseArguments<MicroservicePageOptions, MicroserviceOcrOptions>(args.SplitArgs());
             return parseResult.MapResult(
                 async (MicroservicePageOptions options) =>
                 {
-                    Console.WriteLine($"Request Args: {args}");
-                    Console.WriteLine($"Request File Uri: {fileUri}");
-                    Console.WriteLine($"Request Mime Type: {mimeType}");
                     var file = await processor.ProcessSinglePage(new Uri(fileUri), options);
                     return Results.File(file, mimeType);
                 },
@@ -59,11 +56,6 @@ static class Microservice
                 {
                     var file = await processor.CreateSinglePageOcr(new Uri(fileUri), options);
                     return Results.File(file, mimeType);
-                },
-                async (MicroserviceTestOptions options) => {
-                    Console.WriteLine($"Request Args: {args}");
-                    Console.WriteLine($"Request File Uri: {fileUri}");
-                    return Results.NoContent();
                 },
                 error => Task.FromResult(Results.BadRequest())
             );

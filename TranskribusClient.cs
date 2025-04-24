@@ -64,10 +64,6 @@ class TranskribusClient
         return await Throttle.RunThrottled(async () =>
         {
             var request = Client.Request();
-            // request.Settings.JsonSerializer = new DefaultJsonSerializer(new JsonSerializerOptions 
-            // {
-            //     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-            // });
             var response = await request.PostJsonAsync(new
             {
                 config = new

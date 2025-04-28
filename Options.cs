@@ -23,6 +23,21 @@ class MicroservicePageOptions
 {
     [Option(Required = true)]
     public int HtrId { get; set; }
+
+    [Option]
+    public int? LineDetectionModelId { get; set; }
+
+    [Option]
+    public int? MinimalBaselineLength { get; set; }
+
+    [Option]
+    public int? BaselineAccuracyThreshold { get; set; }
+
+    [Option]
+    public int? MaxDistForMerging { get; set; }
+    
+    [Option]
+    public float? NumTextRegions { get; set; }
 }
 
 [Verb("ocr")]

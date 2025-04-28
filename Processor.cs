@@ -206,7 +206,7 @@ class Processor
         Console.WriteLine($"Getting page PIDs from {pid}...");
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
-            FileName = "drush",
+            FileName = Config["DRUSH_LOCATION"] ?? "drush",
             Arguments = CommonDrushOptions(options) +
                         "idcrudfp " +
                         $"--solr_query=\"RELS_EXT_isMemberOf_uri_ms:info\\:fedora/{pid.Replace(":", "\\:")}\" " +
@@ -226,7 +226,7 @@ class Processor
         Console.WriteLine("Fetching jp2 datastreams...");
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
-            FileName = "drush",
+            FileName = Config["DRUSH_LOCATION"] ?? "drush",
             Arguments = CommonDrushOptions(options) +
                         "idcrudfd -y " +
                         $"--pid_file={pidFilePath} " +
@@ -246,7 +246,7 @@ class Processor
         {
             await RunProcessAndCaptureErrors(new ProcessStartInfo
             {
-                FileName = "magick",
+                FileName = Config["MAGICK_LOCATION"] ?? "magick",
                 Arguments = $"{jp2file} {Path.Join(JpgDirectory, Path.GetFileNameWithoutExtension(jp2file) + ".jpg")}"
             });
         }
@@ -381,7 +381,7 @@ class Processor
             var hocrFile = Path.Join(HocrDirectory, Regex.Replace(Path.GetFileName(altoFile), "_ALTO.xml$", "_HOCR.shtml"));
             await RunProcessAndCaptureErrors(new ProcessStartInfo
             {
-                FileName = "xslt3",
+                FileName = Config["XSLT3_LOCATION"] ?? "xslt3",
                 Arguments = $"-xsl:{Config["ALTO_TO_HOCR_SEF_PATH"]} -s:{altoFile} -o:{hocrFile}"
             });
         }
@@ -413,7 +413,7 @@ class Processor
         Console.WriteLine("Pushing HOCR datastreams to Islandora...");
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
-            FileName = "drush",
+            FileName = Config["DRUSH_LOCATION"] ?? "drush",
             Arguments = CommonDrushOptions(options) +
                         "idcrudpd " +
                         $"--datastreams_source_directory={HocrDirectory}"
@@ -425,7 +425,7 @@ class Processor
         Console.WriteLine("Fetching HOCR datastreams...");
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
-            FileName = "drush",
+            FileName = Config["DRUSH_LOCATION"] ?? "drush",
             Arguments = CommonDrushOptions(options) +
                         "idcrudfd -y " +
                         $"--pid_file={pidFilePath} " +
@@ -439,7 +439,7 @@ class Processor
         Console.WriteLine("Pushing OCR datastreams to Islandora...");
         await RunProcessAndCaptureErrors(new ProcessStartInfo
         {
-            FileName = "drush",
+            FileName = Config["DRUSH_LOCATION"] ?? "drush",
             Arguments = CommonDrushOptions(options) +
                         "idcrudpd " +
                         $"--datastreams_source_directory={OcrDirectory}"

@@ -5,6 +5,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>transkribus_process</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -56,7 +56,7 @@ class Processor
             await ConvertAltoToHocr();
             ProcessHocrXml(
                 new HocrHeaderFixer(options.HtrId, Path.GetFileName(fileUri.LocalPath)),
-                new FontSizeCalculator(double.TryParse(Config["PIXEL_TO_FONTSIZE_CONVERSION"], out var factor) ? factor : 0.1));
+                new WordAlignmentFixer());
             var hocrFile = Directory.EnumerateFiles(HocrDirectory).Single();
             return await File.ReadAllBytesAsync(hocrFile);
         }

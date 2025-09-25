@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 using Flurl.Http;
 
@@ -50,10 +51,12 @@ class Processor
             Directory.CreateDirectory(Jp2Directory);
             await File.WriteAllBytesAsync(Path.Join(Jp2Directory, Path.GetFileName(fileUri.LocalPath)), sourceFile);
             await ConvertJp2sToJpgs();
-            var page = await SendSinglePageToTranskribus(options);            
+            var page = await SendSinglePageToTranskribus(options);
             await GetSinglePageTranskribusAltoXml(page);
             await ConvertAltoToHocr();
-            ProcessHocrXml(new HocrHeaderFixer(options.HtrId, Path.GetFileName(fileUri.LocalPath)));
+            ProcessHocrXml(
+                new HocrHeaderFixer(options.HtrId, Path.GetFileName(fileUri.LocalPath)),
+                new WordAlignmentFixer());
             var hocrFile = Directory.EnumerateFiles(HocrDirectory).Single();
             return await File.ReadAllBytesAsync(hocrFile);
         }
@@ -110,14 +113,14 @@ class Processor
             DeleteDirectoryIfExists(OcrDirectory);
         }
     }
-    
+
     public async Task CreateOcrDatastreamsFromHocr(OcrOptions options)
     {
         string pidFilePath = null;
         try
         {
-            pidFilePath = options.PidFile is null 
-                ? await GetPagePids(options, options.Pid) 
+            pidFilePath = options.PidFile is null
+                ? await GetPagePids(options, options.Pid)
                 : Path.GetFullPath(options.PidFile);
             await GetHocrDatastreams(options, pidFilePath);
             ProcessHocrXml(new OcrGenerator(OcrDirectory));
@@ -401,9 +404,22 @@ class Processor
         foreach (var hocrFile in Directory.EnumerateFiles(HocrDirectory))
         {
             var xml = XDocument.Load(hocrFile);
+            var xmlModified = false;
             foreach (var processor in processors)
             {
-                processor.Process(hocrFile, xml);
+                xmlModified |= processor.Process(hocrFile, xml);
+            }
+            if (xmlModified)
+            {
+                using var fileStream = File.Open(hocrFile, FileMode.Create);
+                var writer = XmlWriter.Create(fileStream, new XmlWriterSettings
+                {
+                    // need to specify false here to stop it from emitting a byte order mark
+                    Encoding = new UTF8Encoding(false),
+                    Indent = true
+                });
+                xml.Save(writer);
+                writer.Close();
             }
         }
     }
